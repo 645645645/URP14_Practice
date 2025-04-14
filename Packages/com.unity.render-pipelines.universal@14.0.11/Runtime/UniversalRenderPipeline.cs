@@ -170,6 +170,8 @@ namespace UnityEngine.Rendering.Universal
         internal static RTHandleResourcePool s_RTHandlePool;
 
         private static bool useRenderGraph;
+        
+        private static CullingResults _cullingResults;
 
         // Reference to the asset associated with the pipeline.
         // When a pipeline asset is switched in `GraphicsSettings`, the `UniversalRenderPipelineCore.asset` member
@@ -667,8 +669,8 @@ namespace UnityEngine.Rendering.Universal
 
                 // Do NOT use cameraData after 'InitializeRenderingData'. CameraData state may diverge otherwise.
                 // RenderingData takes a copy of the CameraData.
-                var cullResults = context.Cull(ref cullingParameters);
-                InitializeRenderingData(asset, ref cameraData, ref cullResults, cmd, out var renderingData);
+                _cullingResults = context.Cull(ref cullingParameters);
+                InitializeRenderingData(asset, ref cameraData, ref _cullingResults, cmd, out var renderingData);
 #if ADAPTIVE_PERFORMANCE_2_0_0_OR_NEWER
                 if (asset.useAdaptivePerformance)
                     ApplyAdaptivePerformance(ref renderingData);
