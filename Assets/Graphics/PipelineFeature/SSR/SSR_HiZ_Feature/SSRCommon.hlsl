@@ -82,12 +82,6 @@ float SampleSceneDepthLOD(float2 uv, int lod)
     return SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_CameraDepthTexture, UnityStereoTransformScreenSpaceTex(uv), lod).r;
 }
 
-float LoadSceneDepth(uint2 uv)
-{
-    return LOAD_TEXTURE2D_X(_CameraDepthTexture, uv).r;
-}
-
-
 float GetHizDepth(float2 uv, float mipLevel = 0.0)
 {
     #if UNITY_REVERSED_Z
@@ -413,7 +407,7 @@ bool rayMarchingInScreenSpace(float3 startVS, float3 reflectDirVS, inout float3 
     // dither
     float2 ditherUV = fmod(screenSamplePoint, 4);
     // half jitter = ditherMartix[ditherUV.x][ditherUV.y];
-    half jitter = ditherArray[ditherUV.x * 4 + ditherUV.y];
+    float jitter = ditherArray[ditherUV.x * 4 + ditherUV.y];
     jitter = lerp(1, jitter, SSR_Dithering);
     screenSamplePoint += stepScreen * jitter;
 
@@ -426,16 +420,15 @@ bool rayMarchingInScreenSpace(float3 startVS, float3 reflectDirVS, inout float3 
     // half oriFac = 0.0;
     // half throuth = 0;
     int missCount = 0;
-    // UNITY_LOOP
-    // for (int i = 0; i <= 1; i++)
+    UNITY_LOOP
+    for (int i = 0; i <= 1; i++)
     {
         bool _isHit = false;
         float viewDepth = _ProjectionParams.x * startVS.z;
         float screenDepth = _ProjectionParams.x * startVS.z;
         float2 currUV; //像素坐标
-        int j = 0;
         UNITY_LOOP
-        for (j = 0; j < SSR_SSRStepNums && screenSamplePoint.x * dir < endZ; j++)
+        for (int j = 0; j < SSR_SSRStepNums && screenSamplePoint.x * dir < endZ; j++)
         {
             if (missCount > 1.0)
             {
@@ -444,7 +437,7 @@ bool rayMarchingInScreenSpace(float3 startVS, float3 reflectDirVS, inout float3 
             }
             screenSamplePoint += stepScreen;
             currUV = permute ? screenSamplePoint.yx : screenSamplePoint;
-            currUV /= _ScreenParams.xy;
+            currUV /= _ScaledScreenParams.xy;
             half4 uvSign = half4(sign(currUV.x), sign(1.0h - currUV.x), sign(currUV.y), sign(1.0h - currUV.y));
 
             if (dot(half4(1, 1, 1, 1), uvSign) < 3.5h)
@@ -477,7 +470,6 @@ bool rayMarchingInScreenSpace(float3 startVS, float3 reflectDirVS, inout float3 
         {
             if (abs(viewDepth - screenDepth) < SSR_Threshold * 3)
             {
-                // currUV =
                 outHitUVz.xy = currUV;
                 outHitUVz.z = viewDepth;
                 return true;
@@ -518,7 +510,7 @@ bool ScreenSpaceRayMarching(inout float2 P, inout float3 Q, inout float K, float
         if (any(hitUV.xy < 0.0) || any(hitUV.xy > 1.0))
             return false;
 
-        float surfaceDepth = -LinearEyeDepth(SampleSceneDepth(hitUV.xy), _ZBufferParams);
+        float surfaceDepth = -LinearEyeDepth(SampleSceneDepthLOD(hitUV.xy, 0), _ZBufferParams);
         bool isBehind = (rayZMin + 0.1 <= surfaceDepth); // 加一个bias 防止stride过小，自反射
 
         depthDistance = abs(surfaceDepth - rayZMax);

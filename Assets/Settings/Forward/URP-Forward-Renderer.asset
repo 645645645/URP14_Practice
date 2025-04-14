@@ -22,7 +22,7 @@ MonoBehaviour:
     ssrType: 2
     ssrIntensity: 5
     ssrStepNums: 64
-    ssrThreshold: 0.5
+    ssrThreshold: 1
     ssrDithering: 1
 --- !u!114 &-1878332245247344467
 MonoBehaviour:

@@ -62,10 +62,15 @@ uint2 InitialTilePixelPositionForReduction2x2(const uint TileSizeLog2, const uin
 
 float GetDeviceMinDepth(float4 gatherDepths)
 {
+    
+    // FurthestDeviceZ = min(min(ParentFurthestDeviceZ.x, ParentFurthestDeviceZ.y), min(ParentFurthestDeviceZ.z, ParentFurthestDeviceZ.w));
+    // ClosestDeviceZ =  max(max(ParentClosestDeviceZ.x,  ParentClosestDeviceZ.y),  max(ParentClosestDeviceZ.z,  ParentClosestDeviceZ.w));
     #ifdef UNITY_REVERSED_Z
-    float minDepth = max(max(gatherDepths.x, gatherDepths.z), max(gatherDepths.y, gatherDepths.w));
-    #else
+    // float minDepth = max(max(gatherDepths.x, gatherDepths.z), max(gatherDepths.y, gatherDepths.w));
     float minDepth = min(min(gatherDepths.x, gatherDepths.z), min(gatherDepths.y, gatherDepths.w));
+    #else
+    // float minDepth = min(min(gatherDepths.x, gatherDepths.z), min(gatherDepths.y, gatherDepths.w));
+    float minDepth = max(max(gatherDepths.x, gatherDepths.z), max(gatherDepths.y, gatherDepths.w));
     #endif
     return minDepth;
 }
