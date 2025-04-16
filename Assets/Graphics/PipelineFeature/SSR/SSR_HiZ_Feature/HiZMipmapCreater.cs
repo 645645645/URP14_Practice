@@ -364,8 +364,8 @@ public class HiZMipmapCreater : ScriptableRendererFeature
                         {
                             x = 1.0f / (float)srcSize.x,
                             y = 1.0f / (float)srcSize.y,
-                            z = ((float)srcSize.x - 1.0f) / (float)srcSize.x,
-                            w = ((float)srcSize.y - 1.0f) / (float)srcSize.y
+                            z = ((float)srcSize.x - 0.5f) / (float)srcSize.x,
+                            w = ((float)srcSize.y - 0.5f) / (float)srcSize.y
                         };
                         ReduceMips(cmd, parentTextureMip, srcSize, 0, destSize,
                             0, dispatchThreadIdToBufferUV, inputViewportMaxBound, false);
@@ -475,6 +475,8 @@ public class HiZMipmapCreater : ScriptableRendererFeature
 
             int end = Mathf.Min(startMipLevel + MaxMipmapLevelOutBatchCount, _numMips);
 
+            //注 这个方式在dx11下不太稳定，
+            //todo：mip改图集方式 先搁置
             if (bUseTemp)
             {
                 // 读写同一个RT的不同mipLevel,问题是资源没被上一个cs释放,造成parent纹理绑定失败,

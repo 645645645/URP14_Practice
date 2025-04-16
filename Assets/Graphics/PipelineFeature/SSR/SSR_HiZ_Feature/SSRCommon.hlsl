@@ -36,14 +36,6 @@ SafeSaturate_Def(float2)
 SafeSaturate_Def(float3)
 SafeSaturate_Def(float4)
 
-static const float4x4 ditherMartix =
-{
-    0.0, 0.5, 0.125, 0.625,
-    0.75, 0.25, 0.875, 0.375,
-    0.187, 0.687, 0.0625, 0.562,
-    0.937, 0.437, 0.812, 0.312
-};
-
 static const float ditherArray[16] =
 {
     0.0, 0.5, 0.125, 0.625,
@@ -229,9 +221,7 @@ bool rayCastHiZ(float3 posWS, float3 reflectDirWS, float roughness, float sceneD
     for (uint i = 0; i < stepNum; ++i)
     {
         float3 CurrentUVZ = RayStartUVz + RayStepUVz * (i);
-        //幻塔的这个只采样0-4mip可能有说法，
-        //unity 的ComputeShader在没有原生内存屏障特性的平台上生成HizMap不能同时读写同一张纹理（即使是不同mip层
-        //但是ue4确实能在DX11没有ResourceBarrier指令情况下,连续读写生成HizMip（RHI,即Rendering Hardware Interface
+        //幻塔的
         float MipLevel = clamp(log2(i) * 0.5, 0, 4);
 
         float HiZDepth = GetHizDepth(CurrentUVZ.xy, MipLevel);

@@ -408,7 +408,7 @@ PrefabInstance:
     - target: {fileID: 5016792105919948062, guid: 4122c2b757815f3418c34b45cc3a6264,
         type: 3}
       propertyPath: maxSampleCount
-      value: 100
+      value: 20
       objectReference: {fileID: 0}
     - target: {fileID: 5267708596480332001, guid: 4122c2b757815f3418c34b45cc3a6264,
         type: 3}
