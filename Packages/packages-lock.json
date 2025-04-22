@@ -1,5 +1,15 @@
 {
   "dependencies": {
+    "com.danbaidong.smoothnormal": {
+      "version": "file:com.danbaidong.smoothnormal@1989771513",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {
+        "com.unity.mathematics": "1.2.1",
+        "com.unity.burst": "1.8.4",
+        "com.unity.render-pipelines.core": "14.0.8"
+      }
+    },
     "com.unity.burst": {
       "version": "1.8.18",
       "depth": 1,

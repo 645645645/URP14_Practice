@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "com.danbaidong.smoothnormal": "https://github.com/danbaidong1111/SmoothNormal.git",
     "com.unity.collab-proxy": "2.6.0",
     "com.unity.ide.rider": "3.0.35",
     "com.unity.memoryprofiler": "1.1.6",

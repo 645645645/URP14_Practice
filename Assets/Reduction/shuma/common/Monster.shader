@@ -44,6 +44,7 @@ Shader "NPR/Monster"
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
+        #include "Packages/com.danbaidong.smoothnormal/Shaders/CompressTools.hlsl"
 
         struct appdata_shadowCaster
         {
@@ -55,16 +56,19 @@ Shader "NPR/Monster"
         {
             float4 pos: POSITION;
             float3 normal: Normal;
+            float4 tangent: TANGENT;
+            float4 uv : TEXCOORD0;
         };
 
         struct appdata_base
         {
             // positionOS 变量包含对象空间中的顶点
             float4 vertex : POSITION;
+            // 声明包含每个顶点的法线矢量的
+            float3 normal : NORMAL;
+            float4 tangent : TANGENT;
             // uv 变量包含给定顶点的纹理上的
             float2 uv : TEXCOORD0;
-            // 声明包含每个顶点的法线矢量的
-            half3 normal : NORMAL;
         };
 
         struct v2f_shadowCaster
@@ -131,8 +135,16 @@ Shader "NPR/Monster"
             v2f_outLine o;
             float viewLen = length(_WorldSpaceCameraPos.xyz - unity_ObjectToWorld[3].xyz);
             float width = (_OutlineLerpOffset + _OutlineLerp) * (viewLen - 1) * _OutlineWidth + _OutlineWidth;
-            //float width = (_OutlineLerpOffset + _OutlineLerp + 1.4) * _OutlineWidth;
-            float3 linePos = width * v.normal * 0.01 + v.pos.xyz;
+            
+            float3 normal = OctahedronToUnitVector(v.uv.zw);
+            float3x3 TBN = float3x3(
+                v.tangent.xyz,
+                cross(v.normal, v.tangent.xyz)* v.tangent.w,
+                v.normal);
+            normal = mul(normal,TBN);
+            
+            float3 linePos = width * normal * 0.01 + v.pos.xyz;
+            // float3 linePos = width * v.normal * 0.01 + v.pos.xyz;
             // float4 resultPos = float4(linePos, v.pos.w);
             o.pos = TransformObjectToHClip(linePos);
             return o;
