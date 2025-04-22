@@ -120,9 +120,9 @@ namespace UnityEditor.SmoothNormalTool
                             mesh.SetNormals(normals);
                             break;
                         case SmoothNormalConfig.WriteTarget.UV0ZW:
-                            List<Vector4> newUv0 = new List<Vector4>(uv0.Length);
-                            SmoothNormalHelper.CopyVector3NormalsToUVZW(ref smoothNormals, ref newUv0, ref uv0, uv0.Length);
-                            mesh.SetUVs(0, newUv0);
+                            List<Vector4> uv0zw = new List<Vector4>(uv0.Length);
+                            SmoothNormalHelper.CopyVector3NormalsToUVZW(ref smoothNormals, ref uv0zw, ref uv0, uv0.Length);
+                            mesh.SetUVs(0, uv0zw);
                             break;
                         case SmoothNormalConfig.WriteTarget.UV1XY:
                             SmoothNormalHelper.CopyVector3NormalsToUVXY(ref smoothNormals, ref uv1, uv1.Length);
