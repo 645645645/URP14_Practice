@@ -15,7 +15,7 @@ public class PreIntegratedSkinShadingLut : EditorWindow
         _512x512 = 512,
     }
 
-    private const string CSBuildPath = "Assets/CustomTools/Editor/BakeTool/PreIntegratedSkinShadingLutCreator.compute";
+    private const string CSBuildPath = "Assets/CustomTools/Editor/BakeTool/SSS_LutBuild/PreIntegratedSkinShadingLutCreator.compute";
     private const string Full_OutPath = "Assets/CustomTools/Engine/BakeOutput/SSS_Lut.TGA";
     private const string Ramp_OutPath = "Assets/CustomTools/Engine/BakeOutput/SSS_Lut_Low.TGA";
 
