@@ -189,9 +189,9 @@
                 float2 lutUV = float2((nl + 0.2) * 0.3472 + 0.5, invR);
                 // float2 lutUV = float2(NdotL * 0.5 + 0.5, invR);
                 half3 lut = SAMPLE_TEXTURE2D_X(_SSSLutTex, sampler_SSSLutTex, lutUV).rgb;
-                kd = lerp(kd, diffuseColor * lut, _CurveFactor);
+                half3 diff = lerp(kd * nl, lut * albedo.rgb, _CurveFactor);
 
-                half3 color = nl * ( kd + directBRDFSpecular) * mainLight.color;
+                half3 color = (diff + nl * directBRDFSpecular) * mainLight.color;
                 
                 
                 half4 irrandiance = SAMPLE_TEXTURECUBE_LOD(_EnvironmentCubemap, sampler_EnvironmentCubemap, normalWS, roughness * 8);
@@ -199,7 +199,7 @@
                 irrandiance.xyz = DecodeHDREnvironment(irrandiance, unity_SpecCube0_HDR);
                 prefilteredColor.xyz = DecodeHDREnvironment(prefilteredColor, unity_SpecCube0_HDR);
                 
-                half3 diffIBL = kd * irrandiance.xyz * lut;
+                half3 diffIBL = lerp(kd, lut * albedo.rgb, _CurveFactor) * irrandiance.xyz;
                 
                 half2 scale_bias = EnvBRDFApproxLazarov(roughness, nv);
                 half3 envBRDF = F0 * scale_bias.xxx + scale_bias.yyy;

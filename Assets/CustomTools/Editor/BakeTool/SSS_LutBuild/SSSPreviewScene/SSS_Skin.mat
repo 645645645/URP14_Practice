@@ -127,7 +127,7 @@ Material:
     - _Intensity: 1
     - _LutIntensity: 0.5
     - _Metallic: 0
-    - _NormalStrength: 4
+    - _NormalStrength: 0
     - _OcclusionStrength: 1
     - _Parallax: 0.005
     - _QueueOffset: 0
