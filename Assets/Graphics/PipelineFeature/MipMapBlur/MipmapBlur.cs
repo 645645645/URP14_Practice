@@ -236,7 +236,7 @@ public class MipmapBlurPass : ScriptableRenderPass
                     m_BlurMaterial, (isFrist || weight < 0.01f) ? 0 : 1);
                 isFrist = false;
             }
-
+            
             // var camera = renderingData.cameraData.camera;
             // cmd.SetViewProjectionMatrices(camera.worldToCameraMatrix, camera.projectionMatrix);
         }

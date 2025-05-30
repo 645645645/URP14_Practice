@@ -52,7 +52,7 @@
       "url": "https://packages.unity.cn"
     },
     "com.unity.ide.rider": {
-      "version": "3.0.35",
+      "version": "3.0.36",
       "depth": 0,
       "source": "registry",
       "dependencies": {
@@ -88,9 +88,9 @@
       "url": "https://packages.unity.cn"
     },
     "com.unity.render-pipelines.core": {
-      "version": "file:com.unity.render-pipelines.core@14.0.11",
-      "depth": 0,
-      "source": "embedded",
+      "version": "14.0.11",
+      "depth": 1,
+      "source": "builtin",
       "dependencies": {
         "com.unity.ugui": "1.0.0",
         "com.unity.modules.physics": "1.0.0",
@@ -99,9 +99,9 @@
       }
     },
     "com.unity.render-pipelines.universal": {
-      "version": "file:com.unity.render-pipelines.universal@14.0.11",
+      "version": "14.0.11",
       "depth": 0,
-      "source": "embedded",
+      "source": "builtin",
       "dependencies": {
         "com.unity.mathematics": "1.2.1",
         "com.unity.burst": "1.8.9",
@@ -111,9 +111,9 @@
       }
     },
     "com.unity.render-pipelines.universal-config": {
-      "version": "file:com.unity.render-pipelines.universal-config@14.0.10",
-      "depth": 0,
-      "source": "embedded",
+      "version": "14.0.10",
+      "depth": 1,
+      "source": "builtin",
       "dependencies": {
         "com.unity.render-pipelines.core": "14.0.10"
       }
@@ -184,6 +184,16 @@
         "com.unity.modules.jsonserialize": "1.0.0"
       },
       "url": "https://packages.unity.cn"
+    },
+    "ulc-tools-fastmeshcopy": {
+      "version": "https://github.com/GeorgeAdamon/FastMeshCopy.git?path=/UnityProject/Assets/FastMeshCopy#master",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {
+        "com.unity.mathematics": "1.2.1",
+        "com.unity.burst": "1.5.4"
+      },
+      "hash": "13cc04a8e53c9f627e2331e3377513e20bdec0db"
     },
     "com.unity.modules.ai": {
       "version": "1.0.0",

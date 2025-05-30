@@ -14,6 +14,7 @@
         [NoScaleOffset]_SSSLutTex ("SSSLut", 2D) = "white" {}
         [NoScaleOffset]_EnvironmentCubemap ("Environment", Cube) = "black" {}
 
+        _StencilNo("Stencil No", Float) = 1
     }
     SubShader
     {
@@ -22,6 +23,13 @@
 
         Pass
         {
+            Name "ForwardSkin"
+            Tags{"LightMode" = "UniversalForward"}
+            Stencil {
+                Ref[_StencilNo]
+                Comp Always
+                Pass Replace
+            }
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag
@@ -191,7 +199,7 @@
                 half3 lut = SAMPLE_TEXTURE2D_X(_SSSLutTex, sampler_SSSLutTex, lutUV).rgb;
                 half3 diff = lerp(kd * nl, lut * albedo.rgb, _CurveFactor);
 
-                half3 color = (diff + nl * directBRDFSpecular) * mainLight.color;
+                half3 color = (diff + nl * directBRDFSpecular * 0) * mainLight.color;
                 
                 
                 half4 irrandiance = SAMPLE_TEXTURECUBE_LOD(_EnvironmentCubemap, sampler_EnvironmentCubemap, normalWS, roughness * 8);
@@ -204,7 +212,7 @@
                 half2 scale_bias = EnvBRDFApproxLazarov(roughness, nv);
                 half3 envBRDF = F0 * scale_bias.xxx + scale_bias.yyy;
                 half3 specIBL = prefilteredColor.xyz * envBRDF;
-                half3 envColor = max(specIBL + diffIBL, 0.0) * LerpWhiteTo(ao , _OcclusionStrength);
+                half3 envColor = max(specIBL * 0 + diffIBL, 0.0) * LerpWhiteTo(ao , _OcclusionStrength);
                 
                 color += envColor;
                 
@@ -214,6 +222,50 @@
                 // return half4(invR.xxx, 1.0);
                 return half4(color.xyz, 1.0);
             }
+            ENDHLSL
+        }
+
+
+        Pass
+        {
+            Name "DepthOnly"
+            Tags
+            {
+                "LightMode" = "DepthOnly"
+            }
+
+            // -------------------------------------
+            // Render State Commands
+            ZWrite On
+            ColorMask 0
+            Cull[_Cull]
+
+            HLSLPROGRAM
+            #pragma target 2.0
+
+            // -------------------------------------
+            // Shader Stages
+            #pragma vertex DepthOnlyVertex
+            #pragma fragment DepthOnlyFragment
+
+            // -------------------------------------
+            // Material Keywords
+            #pragma shader_feature_local _ALPHATEST_ON
+            #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+
+            // -------------------------------------
+            // Unity defined keywords
+            #pragma multi_compile_fragment _ LOD_FADE_CROSSFADE
+
+            //--------------------------------------
+            // GPU Instancing
+            #pragma multi_compile_instancing
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
+
+            // -------------------------------------
+            // Includes
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/Shaders/DepthOnlyPass.hlsl"
             ENDHLSL
         }
     }

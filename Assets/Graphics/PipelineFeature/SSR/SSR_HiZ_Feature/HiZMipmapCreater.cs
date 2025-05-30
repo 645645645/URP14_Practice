@@ -48,6 +48,7 @@ public class HiZMipmapCreater : ScriptableRendererFeature
         Dispose(true);
 
         //-------
+        if (!isActive) return;
         reSetPipSettings();
         //------
 
@@ -178,7 +179,7 @@ public class HiZMipmapCreater : ScriptableRendererFeature
                                                                  SystemInfo.graphicsDeviceType == GraphicsDeviceType.XboxOneD3D12 ||
                                                                  SystemInfo.graphicsDeviceType == GraphicsDeviceType.Vulkan ||
                                                                  SystemInfo.graphicsDeviceType == GraphicsDeviceType.PlayStation5 ||
-                                                                 SystemInfo.graphicsDeviceType == GraphicsDeviceType.PlayStation5NGGC||
+                                                                 SystemInfo.graphicsDeviceType == GraphicsDeviceType.PlayStation5NGGC ||
                                                                  SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3;
         }
 
@@ -266,7 +267,7 @@ public class HiZMipmapCreater : ScriptableRendererFeature
             var cameraDescriptor = cameraData.cameraTargetDescriptor;
 
             CheckScreenResize(cameraDescriptor);
-            
+
             if (!mipIsCreated)
             {
 #if UNITY_EDITOR
@@ -313,7 +314,7 @@ public class HiZMipmapCreater : ScriptableRendererFeature
             // ConfigureTarget(renderer.cameraColorTargetHandle);
             // ConfigureClear(ClearFlag.None, Color.clear);
         }
-        
+
         /// <summary>
         /// GameDisPaly改输出分辨率。没有事件接口
         /// </summary>
@@ -437,7 +438,7 @@ public class HiZMipmapCreater : ScriptableRendererFeature
                         w = 1 / _hzbUvFactor.y
                     };
                     cmd.SetGlobalVector(HiZConstans._HZBUvFactorAndInvFactor, _hzbUvFactorAndInvFactor);
-                    
+
 
                     for (int i = 1; i < _numMips; i++)
                     {
@@ -485,13 +486,13 @@ public class HiZMipmapCreater : ScriptableRendererFeature
                 // 这里blit到临时RT 做个双层汉堡 cs/blit/cs/blit/cs
                 var tempDesc = GetCompatibleDescriptor(HiZConstans.tempRTDesc, parentSize.x, parentSize.y);
                 reAllocateTempRTIfNeeded(parentMipLevel, tempDesc, FilterMode.Point, TextureWrapMode.Clamp);
-                
-                CoreUtils.SetRenderTarget(cmd, _tempRTs[parentMipLevel], 
+
+                CoreUtils.SetRenderTarget(cmd, _tempRTs[parentMipLevel],
                     RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store,
                     ClearFlag.None, Color.clear, 0, CubemapFace.Unknown, -1);
-                
+
                 Blitter.BlitTexture(cmd, parent, Vector2.one, parentMipLevel, false);
-                
+
                 parent = _tempRTs[parentMipLevel];
                 parentMipLevel = 0;
             }

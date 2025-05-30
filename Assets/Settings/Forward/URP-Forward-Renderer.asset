@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f78e190d6b250ee4986c8b18df840313, type: 3}
   m_Name: HiZMipmapBuilder
   m_EditorClassIdentifier: 
-  m_Active: 1
+  m_Active: 0
   m_forwardPipAsset: {fileID: 11400000, guid: 7b7fd9122c28c4d15b667c7040e3b3fd, type: 2}
   m_Settings:
     hizComputeShader: {fileID: 7200000, guid: 2c6185f55c116d943ad949d70b98e15d, type: 3}
@@ -59,6 +59,22 @@ MonoBehaviour:
   - {fileID: 2800000, guid: 3302065f671a8450b82c9ddf07426f3a, type: 3}
   - {fileID: 2800000, guid: 56a77a3e8d64f47b6afe9e3c95cb57d5, type: 3}
   m_Shader: {fileID: 4800000, guid: 0849e84e3d62649e8882e9d6f056a017, type: 3}
+--- !u!114 &-1481777759031923265
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: eab79a5f67fe36247b530546bd6af6d5, type: 3}
+  m_Name: SeparableSubsurfaceScatterFeature
+  m_EditorClassIdentifier: 
+  m_Active: 0
+  settings:
+    sssssPS: {fileID: 4800000, guid: f9aeb2d81cc0410a95ed35631c944951, type: 3}
+    m_event: 500
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -79,7 +95,8 @@ MonoBehaviour:
   - {fileID: -1878332245247344467}
   - {fileID: 7914389848471918926}
   - {fileID: -4554141828574574587}
-  m_RendererFeatureMap: adc0de57c6d2eee54e59208ca28fd56d058810c32270ccc0
+  - {fileID: -1481777759031923265}
+  m_RendererFeatureMap: adc0de57c6d2eee54e59208ca28fd56d058810c32270ccc0bfedd39cfaaa6feb
   m_UseNativeRenderPass: 0
   postProcessData: {fileID: 11400000, guid: 41439944d30ece34e96484bdb6645b55, type: 2}
   xrSystemData: {fileID: 11400000, guid: 60e1133243b97e347b653163a8c01b64, type: 2}

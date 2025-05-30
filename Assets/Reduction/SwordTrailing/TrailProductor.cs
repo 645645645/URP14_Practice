@@ -417,6 +417,7 @@ public class TrailProductor : MonoBehaviour
         if (_meshVertices.IsCreated) _meshVertices.Dispose();
         if (_meshNormals.IsCreated) _meshNormals.Dispose();
         if (_head.isCreated) _head.Dispose();
+        if (_trailRootAccess.isCreated) _trailRootAccess.Dispose();
         if (_crossSectionData.IsCreated) _crossSectionData.Dispose();
         if (movePointQueue.IsCreated) movePointQueue.Dispose();
         if (movePointList.IsCreated) movePointList.Dispose();
@@ -430,7 +431,6 @@ public class TrailProductor : MonoBehaviour
     {
         Dispose();
     }
-
 
     [BurstCompile]
     private struct UpdateRootWorldPos : IJobParallelForTransform

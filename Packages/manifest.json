@@ -2,7 +2,7 @@
   "dependencies": {
     "com.danbaidong.smoothnormal": "https://github.com/danbaidong1111/SmoothNormal.git",
     "com.unity.collab-proxy": "2.6.0",
-    "com.unity.ide.rider": "3.0.35",
+    "com.unity.ide.rider": "3.0.36",
     "com.unity.memoryprofiler": "1.1.6",
     "com.unity.render-pipelines.universal": "14.0.11",
     "com.unity.test-framework": "1.1.33",

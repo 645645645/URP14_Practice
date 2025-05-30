@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Unity.Mathematics;
 using UnityEngine.Jobs;
 
@@ -18,36 +19,73 @@ public static class MathematicsUtil
     public static readonly float3 forward = new float3(0, 0, 1);
     public static readonly float3 one = new float3(1, 1, 1);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int bitmask(bool2 value)
+    {
+        int mask = 0;
+        if (value.x) mask |= 0x01;
+        if (value.y) mask |= 0x02;
+        return mask;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int bitmask(bool3 value)
+    {
+        int mask = 0;
+        if (value.x) mask |= 0x01;
+        if (value.y) mask |= 0x02;
+        if (value.z) mask |= 0x04;
+        return mask;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int bitmask(bool4 value)
+    {
+        int mask = 0;
+        if (value.x) mask |= 0x01;
+        if (value.y) mask |= 0x02;
+        if (value.z) mask |= 0x04;
+        if (value.w) mask |= 0x08;
+        return mask;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float3 LocalToWorldPosition(float3 parentPosition, quaternion parentRotation, float3 targetLocalPosition)
     {
-        return parentPosition + math.mul(parentRotation, targetLocalPosition);
+        return math.mul(parentRotation, targetLocalPosition) + parentPosition;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static quaternion LocalToWorldRotation(quaternion parentRotation, quaternion targetLocalRotation)
     {
         return math.mul(parentRotation, targetLocalRotation);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float3 WorldToLocalPosition(float3 parentPosition, quaternion parentRotation, float3 targetWorldPosition)
     {
         return float3.zero;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static quaternion WorldToLocalRotation(quaternion parentRotation, quaternion targetWorldRotation)
     {
         return quaternion.identity;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float3 GetMatrixPosition(float4x4 matrix)
     {
         return matrix.c3.xyz;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static quaternion GetMatrixRotation(float4x4 matrix)
     {
         return quaternion.LookRotation(matrix.c2.xyz, matrix.c1.xyz);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float3 GetMatrixScale(float4x4 matrix)
     {
         float x = Length(matrix.c0);
@@ -56,58 +94,68 @@ public static class MathematicsUtil
         return new float3(x, y, z);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float3 MatrixMultiplyPoint3x4(float4x4 matrix, float4 pos)
     {
         return matrix.c0.xyz * pos.x + matrix.c1.xyz * pos.y + matrix.c2.xyz * pos.z + matrix.c3.xyz * pos.w;
     }
-
-    // lossyScaleMatrix = Matrix4x4.TRS(transform.position, transform.rotation, Vector3.one).inverse * transform.local2World
-    // or = (transform.worldToLocalMatrix * Matrix4x4.TRS(transform.position, transform.rotation, Vector3.one)).inverse
-    public static float GetLossyScaleX(TransformAccess transformAccess)
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float3 MatrixMultiplyPoint3x4(float4x4 matrix, float3 pos, float w)
     {
-        float4x4 world2Local = transformAccess.worldToLocalMatrix;
-        float4x4 TR = float4x4.TRS(transformAccess.position, transformAccess.rotation, 1);
-        float4x4 scaleMatrix = math.mul(world2Local, TR);
-        return 1 / scaleMatrix.c0.x;
+        return matrix.c0.xyz * pos.x + matrix.c1.xyz * pos.y + matrix.c2.xyz * pos.z + matrix.c3.xyz * w;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float3 GetLossyScale(TransformAccess transformAccess)
+    {
+        return transformAccess.localToWorldMatrix.lossyScale;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float Length(float2 vec)
     {
-        double lengthSQ = math.lengthsq(vec);
-        return lengthSQ > float.Epsilon ? (float)math.sqrt(lengthSQ) : 0f;
+        float lengthSQ = math.lengthsq(vec);
+        return lengthSQ > math.EPSILON ? (float)math.sqrt(lengthSQ) : 0f;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float Length(float3 vec)
     {
-        double lengthSQ = math.lengthsq(vec);
-        return lengthSQ > float.Epsilon ? (float)math.sqrt(lengthSQ) : 0f;
+        float lengthSQ = math.lengthsq(vec);
+        return lengthSQ > math.EPSILON ? (float)math.sqrt(lengthSQ) : 0f;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float Length(float4 vec)
     {
-        double lengthSQ = math.lengthsq(vec);
-        return lengthSQ > float.Epsilon ? (float)math.sqrt(lengthSQ) : 0f;
+        float lengthSQ = math.lengthsq(vec);
+        return lengthSQ > math.EPSILON ? (float)math.sqrt(lengthSQ) : 0f;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float2 Normalize(float2 vec)
     {
-        double magsqr = math.dot(vec, vec);
-        return magsqr > float.Epsilon ? (vec * new float2(math.rsqrt(magsqr))) : float2.zero;
+        float magsqr = math.dot(vec, vec);
+        return magsqr > math.EPSILON ? (vec * new float2(math.rsqrt(magsqr))) : float2.zero;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float3 Normalize(float3 vec)
     {
-        double magsqr = math.dot(vec, vec);
-        return magsqr > float.Epsilon ? (vec * new float3(math.rsqrt(magsqr))) : float3.zero;
+        float magsqr = math.dot(vec, vec);
+        return magsqr > math.EPSILON ? (vec * new float3(math.rsqrt(magsqr))) : float3.zero;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float4 Normalize(float4 vec)
     {
-        double magsqr = math.dot(vec, vec);
-        return magsqr > float.Epsilon ? (vec * new float4(math.rsqrt(magsqr))) : float4.zero;
+        float magsqr = math.dot(vec, vec);
+        return magsqr > math.EPSILON ? (vec * new float4(math.rsqrt(magsqr))) : float4.zero;
     }
 
     //lossyscale有负缩放要补反方向... sign(parentScale)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float3 TransformDirection(float3 parentWorldPos, quaternion parentWorldRot, float3 localDir)
     {
         float4x4 Local2WorldTR = float4x4.TRS(float3.zero, parentWorldRot, 1);
@@ -117,6 +165,7 @@ public static class MathematicsUtil
         return math.mul((float3x3)Local2WorldTR_IT, localDir).xyz;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float3 InverseTransformDirection(float3 parentWorldPos, quaternion parentWorldRot, float3 worldDir)
     {
         float4x4 World2LocalTR_I = float4x4.TRS(float3.zero, parentWorldRot, 1);
@@ -128,7 +177,7 @@ public static class MathematicsUtil
     // {
     //     float fromSq = math.dot(fromDirection, fromDirection);
     //     float toSq = math.dot(toDirection, toDirection);
-    //     if(fromSq <= float.Epsilon || toSq <= float.Epsilon)
+    //     if(fromSq <= math.EPSILON || toSq <= math.EPSILON)
     //         return quaternion.identity;
     //     
     //     float3 unitFrom = fromDirection * math.rsqrt(fromSq);
@@ -152,6 +201,7 @@ public static class MathematicsUtil
     //     }
     // }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static quaternion FromToRotation(float3 from, float3 to)
     {
         float3
@@ -162,6 +212,7 @@ public static class MathematicsUtil
         return math.normalize(q);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static quaternion QuaternionMultiply(quaternion lhs, quaternion rhs)
     {
         return new quaternion(
@@ -172,6 +223,7 @@ public static class MathematicsUtil
     }
 
     // Rotates the point /point/ with /rotation/.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float3 QuaternionMultiplyPoint(quaternion rotation, float3 point)
     {
         float x = rotation.value.x * 2F;
@@ -194,6 +246,7 @@ public static class MathematicsUtil
         return res;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static quaternion QuaternionNormalize(quaternion q)
     {
         float mag = math.sqrt(math.dot(q, q));
@@ -204,23 +257,27 @@ public static class MathematicsUtil
         return new quaternion(q.value.x / mag, q.value.y / mag, q.value.z / mag, q.value.w / mag);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool QuaternionIsEqualUsingDot(float dot)
     {
         // Returns false in the presence of NaN values.
         return dot > 1.0f - kEpsilon;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool QuaternionEquals(quaternion lhs, quaternion rhs)
     {
         return QuaternionIsEqualUsingDot(math.dot(lhs, rhs));
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float QuaternionAngle(quaternion a, quaternion b)
     {
         float dot = math.min(math.abs(math.dot(a, b)), 1.0F);
         return QuaternionIsEqualUsingDot(dot) ? 0.0f : math.acos(dot) * 2.0F * Rad2Deg;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static quaternion QuaternionRotateTowards(quaternion from, quaternion to, float maxDegreesDelta)
     {
         float angle = QuaternionAngle(from, to);
@@ -228,6 +285,7 @@ public static class MathematicsUtil
         return QuaternionSlerpUnclamped(from, to, math.min(1.0f, maxDegreesDelta / angle));
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static quaternion QuaternionSlerpUnclamped(quaternion a, quaternion b, float t)
     {
         // 计算点积并处理对跖点（最短路径）
@@ -257,11 +315,12 @@ public static class MathematicsUtil
 
         return result;
     }
-    
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static quaternion QuaternionInverse(quaternion q)
     {
         float normSq = math.lengthsq(q);
-        
+
         if (normSq < math.EPSILON)
         {
             return quaternion.identity;
@@ -269,12 +328,155 @@ public static class MathematicsUtil
 
         float invNormSq = 1.0f * math.rcp(normSq);
         quaternion conjugate = new quaternion(q.value.x * -1, q.value.y * -1, q.value.z * -1, q.value.w);
-        
+
         return new quaternion(
             conjugate.value.x * invNormSq,
             conjugate.value.y * invNormSq,
             conjugate.value.z * invNormSq,
             conjugate.value.w * invNormSq
         );
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float3 RotatePointAroundAxis(float3 point, float3 ori, float3 axis, float angle)
+    {
+        axis = Normalize(axis);
+        quaternion rotation = quaternion.AxisAngle(axis, angle);
+
+        return math.mul(rotation, point - ori) + ori;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float3 GetBoundsMin(
+        float3 a, float3 b, float3 c, float3 d,
+        float3 e, float3 f, float3 g, float3 h)
+    {
+        return new float3(
+            GetBoundsMinByAxis(0, a, b, c, d, e, f, g, h),
+            GetBoundsMinByAxis(1, a, b, c, d, e, f, g, h),
+            GetBoundsMinByAxis(2, a, b, c, d, e, f, g, h)
+        );
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float3 GetBoundsMax(
+        float3 a, float3 b, float3 c, float3 d,
+        float3 e, float3 f, float3 g, float3 h)
+    {
+        return new float3(
+            GetBoundsMaxByAxis(0, a, b, c, d, e, f, g, h),
+            GetBoundsMaxByAxis(1, a, b, c, d, e, f, g, h),
+            GetBoundsMaxByAxis(2, a, b, c, d, e, f, g, h)
+        );
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float GetBoundsMinByAxis(int index,
+        float3 a, float3 b, float3 c, float3 d,
+        float3 e, float3 f, float3 g, float3 h)
+    {
+        return math.min(math.min(math.min(a[index], b[index]), math.min(c[index], d[index])), math.min(math.min(e[index], f[index]), math.min(g[index], h[index])));
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float GetBoundsMaxByAxis(int index,
+        float3 a, float3 b, float3 c, float3 d,
+        float3 e, float3 f, float3 g, float3 h)
+    {
+        return math.max(math.max(math.max(a[index], b[index]), math.max(c[index], d[index])), math.max(math.max(e[index], f[index]), math.max(g[index], h[index])));
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool AABBOverlap(in float3 particlePosition, in float particleRadius, in float3 min, in float3 max)
+    {
+        float3 
+            pMin = particlePosition - particleRadius,
+            pMax = particlePosition + particleRadius;
+        return (pMax.x >= min.x && pMin.x <= max.x) &&
+               (pMax.y >= min.y && pMin.y <= max.y) &&
+               (pMax.z >= min.z && pMin.z <= max.z);
+    }
+        
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool AABBOverlap(in float3 aMin, in float3 aMax, in float3 bMin, in float3 bMax)
+    {
+        return (aMax.x >= bMin.x && aMin.x <= bMax.x) &&
+               (aMax.y >= bMin.y && aMin.y <= bMax.y) &&
+               (aMax.z >= bMin.z && aMin.z <= bMax.z);
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float2 UnitVectorToOctahedron(float3 N)
+    {
+        float2 Oct = N.xy;
+        if (N.z < 0)
+        {
+            Oct = (1 - math.abs(N.yx)) * new  float2(N.x >= 0 ? 1 : -1, N.y >= 0 ? 1 : -1);
+        }
+        return Oct;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float3 OctahedronToUnitVector(float2 Oct)
+    {
+        float3 N = new float3(Oct, 1 - math.dot(1, math.abs(Oct)));
+        if (N.z < 0)
+        {
+            // N.xy = (1 - math.abs(N.yx)) * (N.xy >= 0 ? new float2(1, 1) : new float2(-1, -1));
+            N.xy = (1 - math.abs(N.yx)) * math.select(new float2(-1, -1), new float2(1, 1), N.xy >= 0);
+        }
+        return math.normalize(N);
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool InFrustum(in float4x4 cullingMatrix, in float4 pos)
+    {
+        float4 p = math.mul(cullingMatrix, pos);
+        return p.w > p.x && -p.w < p.x && p.w > p.y && (-p.w < p.y) && p.w > p.z && -p.w < p.z;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool InFrustum(in float4x4 cullingMatrix, in float3 pos)
+    {
+        float4 p = math.mul(cullingMatrix, new float4(pos,1));
+        return p.w > p.x && -p.w < p.x && p.w > p.y && (-p.w < p.y) && p.w > p.z && -p.w < p.z;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool InFrustum(in float4 p)
+    {
+        return p.w > p.x && -p.w < p.x && p.w > p.y && (-p.w < p.y) && p.w > p.z && -p.w < p.z;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool InSphereSpacial(in float3 point, float pointRadius , in float3 center, float radius)
+    {
+        float3 d = point - center;
+        float d2 = math.dot(d, d);
+        float r = pointRadius + radius;
+        return d2 < r * r;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool InSphereSpacial(in float3 point, float pointRadius , in float4 centerParams)
+    {
+        float3 d = point - centerParams.xyz;
+        float d2 = math.dot(d, d);
+        float r = pointRadius + centerParams.w;
+        return d2 < r * r;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool PointInRect(in float3 p1, in float3 p2, in float3 p3, in float3 p4, in float3 p)
+    {
+        bool inRect1 = math.dot(GetCross(p1, p2, p), GetCross(p3, p4, p)) >= 0;
+        bool inRect2 = math.dot(GetCross(p2, p3, p), GetCross(p4, p1, p)) >= 0;
+        return inRect1 && inRect2;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float3 GetCross(in float3 p1, in float3 p2, in float3 p)
+    {
+        return math.cross(p2 - p1, p - p1);
     }
 }
