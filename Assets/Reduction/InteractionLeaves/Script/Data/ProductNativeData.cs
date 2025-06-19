@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine.Jobs;
@@ -8,113 +10,97 @@ using UnityEngine.Rendering;
 
 namespace UnityEngine.PBD
 {
-    public struct ProductNativeData
+    public unsafe struct ProductNativeData
     {
-        // struct ForceQueueOrder : IEquatable<ForceQueueOrder>
-        // {
-        //     public readonly PBDForceApplicationOrder Order;
-        //     public int Index;       //整体的
-        //     public int OrderIndex;  //分类中的
-        //     private readonly int _hash;
-        //
-        //     public ForceQueueOrder(PBDForceApplicationOrder order, int hash, int index = -1, int orderIndex = -1)
-        //     {
-        //         Order = order;
-        //         Index = index;
-        //         OrderIndex = orderIndex;
-        //         _hash = hash;
-        //     }
-        //
-        //     public bool Equals(ForceQueueOrder other)
-        //     {
-        //         return _hash.Equals(other._hash);
-        //     }
-        // }
-        
         //runtime
-        public NativeArray<uint> trianglesArrayUInt;
-        public NativeArray<ushort> trianglesArrayUShort;
-        public NativeArray<float3> verticesArray;
-        public NativeArray<float2> normalArray;
-        public NativeArray<half2> meshUVsArray;
-        public NativeArray<float3> verticesForRendering;
-        public NativeArray<float2> normalForRendering;
-        public NativeArray<half2> uvsForRendering;
+        public NativeArray<uint>      trianglesArrayUInt;
+        public NativeArray<ushort>    trianglesArrayUShort;
+        public NativeArray<float3>    verticesArray;
+        public NativeArray<UNorm8x4>  uvsAndNormal;
+        public NativeArray<UNorm16x2> normalArray;
+        public NativeArray<UNorm16x2> meshUVsArray;
+        public NativeArray<float3>    verticesForRendering;
+        public NativeArray<UNorm8x4>  uvsAndNormalForRendering;
+        public NativeArray<UNorm16x2> normalForRendering;
+        public NativeArray<UNorm16x2> uvsForRendering;
 
-        public NativeArray<Position> m_positions;
-        public NativeArray<PredictedPositions> m_predictedPositions;
-        public NativeArray<Velocity> m_velocities;
-        public NativeArray<Normal> m_normals;
-        public NativeArray<Radius> m_radius;
-        public NativeArray<InvMass> m_invmasses;
-        public NativeArray<Area> m_areas;
-        public NativeArray<ExtForce> m_extForces;
+        public NativeArray<Position>                    m_positions;
+        public NativeArray<PredictedPositions>          m_predictedPositions;
+        public NativeArray<Velocity>                    m_velocities;
+        public NativeArray<Normal>                      m_normals;
+        public NativeArray<Radius>                      m_radius;
+        public NativeArray<InvMass>                     m_invmasses;
+        public NativeArray<Area>                        m_areas;
+        public NativeArray<ExtForce>                    m_extForces;
         public NativeArray<ParticleCollisionConstraint> m_particleCollisionConstraints;
-        public NativeArray<RigiCollisionConstraint> m_rigiCollisionConstraints;
-        public NativeArray<IsNeedUpdate> m_isNeedUpdates;
-        public NativeArray<IsNeedRender> m_isNeedRenders;
-        public NativeArray<QuadPredictedPositions> m_quadPredictedPosition;
-        public NativeArray<QuadVelocity> m_quadVelocity;
-        public NativeArray<QuadInvMass> m_quadInvMass;
-        public NativeList<int> m_UpdateList;
-        public NativeList<int> m_StaticList;
-        public NativeList<int> m_ExtDynamicForceList;
-        public NativeList<int> m_ExtPostDynamicForceList;
-        public NativeList<int> m_RenderList;
-        public NativeArray<int> m_RenderCounter;
-        
-        public NativeList<JobHandle> updateMeshPosJobHandles;
-        public NativeList<JobHandle> updateMeshUvJobHandles;
-        public NativeList<JobHandle> updateMeshNormalJobHandles;
-        
-        //
-        public NativeArray<int2> m_disContraintIndexes;
-        public NativeArray<DistanceConstraint> m_distanceConstraints;
-        public NativeArray<BendConstraint> m_bendConstraints;
-        public NativeMultiHashMap<int, int> m_collisionNeighours;
-        public NativeList<ParticleHash> m_particleHashes;
-        public NativeHashMap<int, HashRange> m_particleHashRanges;
-        public NativeArray<int3> m_neighborOffsets;
+        public NativeArray<RigiCollisionConstraint>     m_rigiCollisionConstraints;
+        public NativeArray<IsNeedUpdate>                m_isNeedUpdates;
+        public NativeArray<IsNeedRender>                m_isNeedRenders;
+        public NativeArray<QuadPredictedPositions>      m_quadPredictedPosition;
+        public NativeArray<QuadVelocity>                m_quadVelocity;
+        public NativeArray<QuadInvMass>                 m_quadInvMass;
+        public NativeList<int>                          m_UpdateList;
+        public NativeList<int>                          m_StaticList;
+        public NativeList<int>                          m_ExtDynamicForceList;
+        public NativeList<int>                          m_ExtPostDynamicForceList;
+        public NativeList<int>                          m_RenderList;
+        public NativeArray<int>                         m_RenderCounter;
+        public NativeArray<int>                         m_UpdateCounter;
 
-        public NativeArray<PBDBounds> m_sceneBounds;
-        public NativeList<PBDCustomColliderInfo> m_rigibodyColliders;
-        public TransformAccessArray m_rigibodyColliderTrasnforms;
-        
-        private NativeList<int> m_colliderIDsList;
+        //
+        public NativeArray<int2>                                    m_disContraintIndexes;
+        public NativeArray<DistanceConstraint>                      m_distanceConstraints;
+        public NativeArray<BendConstraint>                          m_bendConstraints;
+        public NativeParallelMultiHashMap<int, int>                 m_collisionNeighours;
+        public NativeList<BaseHash>                                 m_particleHashes;
+        public UnsafeParallelHashMap<PrecomputedHashKey, HashRange> m_particleHashRanges;
+        public NativeList<int>                                      m_particle_Hashes;
+        public SimpleHashArray<HashRange>                           m_particleSimpleHashRanges;
+        public NativeArray<int3>                                    m_neighborOffsets;
+
+        public NativeArray<PBDBounds>                               m_sceneBounds;
+        public NativeList<PBDCustomColliderInfo>                    m_rigibodyColliders;
+        public TransformAccessArray                                 m_rigibodyColliderTrasnforms;
+        public NativeList<BaseHash>                                 m_rigibodyHashes;
+        public UnsafeParallelHashMap<PrecomputedHashKey, HashRange> m_rigibodyHashRanges;
+
+        public RigidbodyOctree m_RigibodyOctree;
+        public NativeList<int> m_RigibodyRemoveSequence;
+
+        private NativeList<int>        m_colliderIDsList;
         private Queue<PBDColliderBase> m_rigiAddQueue;
         private Queue<PBDColliderBase> m_rigiRemoveQueue;
         private Queue<PBDColliderBase> m_rigiUpdateQueue;
 
         public NativeList<PBDForceField> m_preForceFields;
-        public TransformAccessArray m_preForceTransforms;
+        public TransformAccessArray      m_preForceTransforms;
         public NativeList<PBDForceField> m_forceFields;
-        public TransformAccessArray m_forceTransforms;
+        public TransformAccessArray      m_forceTransforms;
         public NativeList<PBDForceField> m_postForceFields;
+
         public TransformAccessArray m_postForceTransforms;
-        // private NativeList<ForceQueueOrder> m_forceDic;
+
         private NativeList<int> m_preForceIDList;
         private NativeList<int> m_forceIDList;
         private NativeList<int> m_postForceIDList;
         private NativeList<int> m_allForceIDList;
-        
-        // private NativeList<ForceQueueOrder> m_forceTypesList;
-        
+
         private Queue<PBDForce> m_forceAddQueue;
         private Queue<PBDForce> m_forceRemoveQueue;
         private Queue<PBDForce> m_forceUpdateQueue;
-        
-        
+
+
         public NativeArray<float4> skinSplitParams;
         public NativeArray<float3> productParams;
 
-        private bool colliderListIsCreat => m_rigibodyColliders.IsCreated &&
+        private bool colliderListIsCreat => m_rigibodyColliders.IsCreated          &&
                                             m_rigibodyColliderTrasnforms.isCreated &&
                                             m_colliderIDsList.IsCreated;
 
-        private bool forceListIsCreat => m_forceFields.IsCreated && m_forceTransforms.isCreated &&
-                                         m_preForceFields.IsCreated && m_preForceTransforms.isCreated &&
+        private bool forceListIsCreat => m_forceFields.IsCreated     && m_forceTransforms.isCreated     &&
+                                         m_preForceFields.IsCreated  && m_preForceTransforms.isCreated  &&
                                          m_postForceFields.IsCreated && m_postForceTransforms.isCreated &&
-                                         m_preForceIDList.IsCreated && m_forceIDList.IsCreated && 
+                                         m_preForceIDList.IsCreated  && m_forceIDList.IsCreated         &&
                                          m_postForceIDList.IsCreated && m_allForceIDList.IsCreated;
 
         public bool Initialize(in ProductLeavesPropertiesData data)
@@ -125,76 +111,108 @@ namespace UnityEngine.PBD
                 Debug.LogError($"LeavesTexSplitParams has a problem = {leaveTpyeCount}");
                 return false;
             }
+
             skinSplitParams = new NativeArray<float4>(leaveTpyeCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             data.InitSkinParams(ref skinSplitParams);
 
             productParams = new NativeArray<float3>(5, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
             var maxLeavesCount = data.MaxLeavesCount;
-            var verticesCount = data.VerticesCount;
+            var verticesCount  = data.VerticesCount;
             var trianglesCount = data.TrianglesCount;
-            m_positions = new NativeArray<Position>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_predictedPositions = new NativeArray<PredictedPositions>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_velocities = new NativeArray<Velocity>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_normals = new NativeArray<Normal>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_radius = new NativeArray<Radius>(maxLeavesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_invmasses = new NativeArray<InvMass>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_areas = new NativeArray<Area>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_extForces = new NativeArray<ExtForce>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+
+            data.InitialBucketCapacityMask();
+            
+            m_positions                    = new NativeArray<Position>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_predictedPositions           = new NativeArray<PredictedPositions>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_velocities                   = new NativeArray<Velocity>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_normals                      = new NativeArray<Normal>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_radius                       = new NativeArray<Radius>(maxLeavesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_invmasses                    = new NativeArray<InvMass>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_areas                        = new NativeArray<Area>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_extForces                    = new NativeArray<ExtForce>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             m_particleCollisionConstraints = new NativeArray<ParticleCollisionConstraint>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_rigiCollisionConstraints = new NativeArray<RigiCollisionConstraint>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_isNeedUpdates = new NativeArray<IsNeedUpdate>(maxLeavesCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
-            m_isNeedRenders = new NativeArray<IsNeedRender>(maxLeavesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_rigiCollisionConstraints     = new NativeArray<RigiCollisionConstraint>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_isNeedUpdates                = new NativeArray<IsNeedUpdate>(maxLeavesCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            m_isNeedRenders                = new NativeArray<IsNeedRender>(maxLeavesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
             m_quadPredictedPosition = new NativeArray<QuadPredictedPositions>(maxLeavesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_quadVelocity = new NativeArray<QuadVelocity>(maxLeavesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_quadInvMass = new NativeArray<QuadInvMass>(maxLeavesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_quadVelocity          = new NativeArray<QuadVelocity>(maxLeavesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_quadInvMass           = new NativeArray<QuadInvMass>(maxLeavesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
             m_distanceConstraints = new NativeArray<DistanceConstraint>(maxLeavesCount * 5, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            m_bendConstraints = new NativeArray<BendConstraint>(maxLeavesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_bendConstraints     = new NativeArray<BendConstraint>(maxLeavesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
-            //girdBase
-            m_collisionNeighours = new NativeMultiHashMap<int, int>(verticesCount * 27, Allocator.Persistent);
-            //compactHash
-            m_particleHashes = new NativeList<ParticleHash>(verticesCount, Allocator.Persistent);
-            m_particleHashRanges = new NativeHashMap<int, HashRange>(verticesCount, Allocator.Persistent);
+            switch (data.particlesCollisionMode)
+            {
+                case ParticlesCollisionMode.GridBasedHash:
+                    //girdBase
+                    m_collisionNeighours = new NativeParallelMultiHashMap<int, int>(verticesCount * 27, Allocator.Persistent);
+                    break;
+                case ParticlesCollisionMode.CompactHash:
+                    //compactHash
+                    m_particleHashes     = new NativeList<BaseHash>(verticesCount, Allocator.Persistent);
+                    m_particleHashRanges = new UnsafeParallelHashMap<PrecomputedHashKey, HashRange>(verticesCount, Allocator.Persistent);
+                    break;
+                case ParticlesCollisionMode.CompactHashReverseSearch:
+                    m_particleHashes           = new NativeList<BaseHash>(verticesCount, Allocator.Persistent);
+//                    m_particleHashRanges       = new UnsafeParallelHashMap<PrecomputedHashKey, HashRange>(verticesCount, Allocator.Persistent);
+                    m_particleSimpleHashRanges = new SimpleHashArray<HashRange>(verticesCount, Allocator.Persistent);
+                    m_particle_Hashes          = new NativeList<int>(verticesCount, Allocator.Persistent);
+                    break;
+            }
 
-            int colliderCapacity = 128;
-            m_rigibodyColliders = new NativeList<PBDCustomColliderInfo>(colliderCapacity, Allocator.Persistent);
+            m_sceneBounds = new NativeArray<PBDBounds>(1, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+
+            int colliderCapacity = 32;
+            m_rigibodyColliders          = new NativeList<PBDCustomColliderInfo>(colliderCapacity, Allocator.Persistent);
             m_rigibodyColliderTrasnforms = new TransformAccessArray(colliderCapacity, data.DesignJobThreadNum);
-            m_colliderIDsList = new NativeList<int>(colliderCapacity, Allocator.Persistent);
+            m_colliderIDsList            = new NativeList<int>(colliderCapacity, Allocator.Persistent);
 
-            m_sceneBounds = new NativeArray<PBDBounds>(1, Allocator.Persistent, NativeArrayOptions.UninitializedMemory); 
-            
-            m_rigiAddQueue = new Queue<PBDColliderBase>(colliderCapacity);
+            switch (data.rigibodyFilterMode)
+            {
+                case RigibodyFilterMode.SimpleAABB:
+                    break;
+                case RigibodyFilterMode.Voxel:
+                    m_rigibodyHashes     = new NativeList<BaseHash>(data.rigiVoxelCount * 2, Allocator.Persistent);
+                    m_rigibodyHashRanges = new UnsafeParallelHashMap<PrecomputedHashKey, HashRange>(data.rigiVoxelCount, Allocator.Persistent);
+                    break;
+                case RigibodyFilterMode.Octree:
+                    m_RigibodyOctree         = new RigidbodyOctree(128);
+                    m_RigibodyRemoveSequence = new NativeList<int>(128, Allocator.Persistent);
+                    break;
+            }
+
+            m_rigiAddQueue    = new Queue<PBDColliderBase>(colliderCapacity);
             m_rigiRemoveQueue = new Queue<PBDColliderBase>(colliderCapacity);
             m_rigiUpdateQueue = new Queue<PBDColliderBase>(colliderCapacity);
 
-            int forceCapacity = 128;
-            m_forceFields = new NativeList<PBDForceField>(forceCapacity, Allocator.Persistent);
-            m_forceTransforms = new TransformAccessArray(forceCapacity, data.DesignJobThreadNum);
-            m_preForceFields = new NativeList<PBDForceField>(forceCapacity, Allocator.Persistent);
-            m_preForceTransforms = new TransformAccessArray(forceCapacity, data.DesignJobThreadNum);
-            m_postForceFields = new NativeList<PBDForceField>(forceCapacity, Allocator.Persistent);
+            int forceCapacity = 32;
+            m_forceFields         = new NativeList<PBDForceField>(forceCapacity, Allocator.Persistent);
+            m_forceTransforms     = new TransformAccessArray(forceCapacity, data.DesignJobThreadNum);
+            m_preForceFields      = new NativeList<PBDForceField>(forceCapacity, Allocator.Persistent);
+            m_preForceTransforms  = new TransformAccessArray(forceCapacity, data.DesignJobThreadNum);
+            m_postForceFields     = new NativeList<PBDForceField>(forceCapacity, Allocator.Persistent);
             m_postForceTransforms = new TransformAccessArray(forceCapacity, data.DesignJobThreadNum);
-            m_preForceIDList = new NativeList<int>(forceCapacity, Allocator.Persistent);
-            m_forceIDList = new NativeList<int>(forceCapacity, Allocator.Persistent);
-            m_postForceIDList = new NativeList<int>(forceCapacity, Allocator.Persistent);
-            m_allForceIDList = new NativeList<int>(forceCapacity, Allocator.Persistent);
+            m_preForceIDList      = new NativeList<int>(forceCapacity, Allocator.Persistent);
+            m_forceIDList         = new NativeList<int>(forceCapacity, Allocator.Persistent);
+            m_postForceIDList     = new NativeList<int>(forceCapacity, Allocator.Persistent);
+            m_allForceIDList      = new NativeList<int>(forceCapacity, Allocator.Persistent);
 
-            m_forceAddQueue = new Queue<PBDForce>(forceCapacity);
+            m_forceAddQueue    = new Queue<PBDForce>(forceCapacity);
             m_forceRemoveQueue = new Queue<PBDForce>(forceCapacity);
             m_forceUpdateQueue = new Queue<PBDForce>(forceCapacity);
 
             InitializeNeighborOffsets();
             InitializeDisContraintIndexes();
-            
-            m_UpdateList = new NativeList<int>(maxLeavesCount, Allocator.Persistent);
-            m_StaticList = new NativeList<int>(maxLeavesCount, Allocator.Persistent);
-            m_ExtDynamicForceList = new NativeList<int>(maxLeavesCount, Allocator.Persistent);
+
+            m_UpdateList              = new NativeList<int>(maxLeavesCount, Allocator.Persistent);
+            m_StaticList              = new NativeList<int>(maxLeavesCount, Allocator.Persistent);
+            m_ExtDynamicForceList     = new NativeList<int>(maxLeavesCount, Allocator.Persistent);
             m_ExtPostDynamicForceList = new NativeList<int>(maxLeavesCount, Allocator.Persistent);
-            m_RenderList = new NativeList<int>(maxLeavesCount, Allocator.Persistent);
-            m_RenderCounter = new NativeArray<int>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            m_RenderList              = new NativeList<int>(maxLeavesCount, Allocator.Persistent);
+            m_RenderCounter           = new NativeArray<int>(1, Allocator.Persistent);
+            m_UpdateCounter           = new NativeArray<int>(1, Allocator.Persistent);
 
             switch (data.indexFormat)
             {
@@ -205,22 +223,29 @@ namespace UnityEngine.PBD
                     trianglesArrayUInt = new NativeArray<uint>(trianglesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                     break;
             }
-            verticesArray = new NativeArray<float3>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            normalArray = new NativeArray<float2>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            meshUVsArray = new NativeArray<half2>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
-            // verticesForRendering = new NativeArray<float3>(verticesCount, Allocator.Persistent);
-            // normalForRendering = new NativeArray<float2>(verticesCount, Allocator.Persistent);
-            uvsForRendering = new NativeArray<half2>(verticesCount, Allocator.Persistent);
+            verticesArray = new NativeArray<float3>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+
+            switch (data.uvNormalFormat)
+            {
+                case MeshUvNormalFormat.UNorm16x2:
+                    normalArray  = new NativeArray<UNorm16x2>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                    meshUVsArray = new NativeArray<UNorm16x2>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+
+                    // verticesForRendering = new NativeArray<float3>(verticesCount, Allocator.Persistent);
+                    // normalForRendering = new NativeArray<UNorm16x2>(verticesCount, Allocator.Persistent);
+                    uvsForRendering = new NativeArray<UNorm16x2>(verticesCount, Allocator.Persistent);
+                    break;
+                case MeshUvNormalFormat.UNorm8x4:
+                    uvsAndNormal             = new NativeArray<UNorm8x4>(verticesCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                    uvsAndNormalForRendering = new NativeArray<UNorm8x4>(verticesCount, Allocator.Persistent);
+                    break;
+            }
             
-            int threadNum = data.DesignJobThreadNum;
-            updateMeshPosJobHandles = new NativeList<JobHandle>(threadNum, Allocator.Persistent);
-            updateMeshUvJobHandles = new NativeList<JobHandle>(threadNum, Allocator.Persistent);
-            updateMeshNormalJobHandles = new NativeList<JobHandle>(threadNum, Allocator.Persistent);
 
             return true;
         }
-        
+
         private void InitializeNeighborOffsets()
         {
             m_neighborOffsets = new NativeArray<int3>(27, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
@@ -240,7 +265,7 @@ namespace UnityEngine.PBD
 
         private void InitializeDisContraintIndexes()
         {
-            m_disContraintIndexes = new NativeArray<int2>(5, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_disContraintIndexes    = new NativeArray<int2>(5, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             m_disContraintIndexes[0] = new int2(1, 0);
             m_disContraintIndexes[1] = new int2(1, 2);
             m_disContraintIndexes[2] = new int2(1, 3);
@@ -270,6 +295,8 @@ namespace UnityEngine.PBD
             if (m_collisionNeighours.IsCreated) m_collisionNeighours.Dispose();
             if (m_particleHashes.IsCreated) m_particleHashes.Dispose();
             if (m_particleHashRanges.IsCreated) m_particleHashRanges.Dispose();
+            if (m_particle_Hashes.IsCreated) m_particle_Hashes.Dispose();
+            if (m_particleSimpleHashRanges.IsCreated) m_particleSimpleHashRanges.Dispose();
             if (m_neighborOffsets.IsCreated) m_neighborOffsets.Dispose();
             if (m_disContraintIndexes.IsCreated) m_disContraintIndexes.Dispose();
 
@@ -278,6 +305,11 @@ namespace UnityEngine.PBD
             if (m_rigibodyColliders.IsCreated) m_rigibodyColliders.Dispose();
             if (m_rigibodyColliderTrasnforms.isCreated) m_rigibodyColliderTrasnforms.Dispose();
             if (m_colliderIDsList.IsCreated) m_colliderIDsList.Dispose();
+            if (m_rigibodyHashes.IsCreated) m_rigibodyHashes.Dispose();
+            if (m_rigibodyHashRanges.IsCreated) m_rigibodyHashRanges.Dispose();
+
+            m_RigibodyOctree.Dispose();
+            if (m_RigibodyRemoveSequence.IsCreated) m_RigibodyRemoveSequence.Dispose();
 
             if (m_forceFields.IsCreated) m_forceFields.Dispose();
             if (m_forceTransforms.isCreated) m_forceTransforms.Dispose();
@@ -297,10 +329,12 @@ namespace UnityEngine.PBD
             if (verticesArray.IsCreated) verticesArray.Dispose();
             if (normalArray.IsCreated) normalArray.Dispose();
             if (meshUVsArray.IsCreated) meshUVsArray.Dispose();
+            if (uvsAndNormal.IsCreated) uvsAndNormal.Dispose();
 
             if (verticesForRendering.IsCreated) verticesForRendering.Dispose();
             if (normalForRendering.IsCreated) normalForRendering.Dispose();
             if (uvsForRendering.IsCreated) uvsForRendering.Dispose();
+            if (uvsAndNormalForRendering.IsCreated) uvsAndNormalForRendering.Dispose();
 
             if (m_UpdateList.IsCreated) m_UpdateList.Dispose();
             if (m_StaticList.IsCreated) m_StaticList.Dispose();
@@ -308,14 +342,11 @@ namespace UnityEngine.PBD
             if (m_ExtPostDynamicForceList.IsCreated) m_ExtPostDynamicForceList.Dispose();
             if (m_RenderList.IsCreated) m_RenderList.Dispose();
             if (m_RenderCounter.IsCreated) m_RenderCounter.Dispose();
-
-            if (updateMeshPosJobHandles.IsCreated) updateMeshPosJobHandles.Dispose();
-            if (updateMeshNormalJobHandles.IsCreated) updateMeshNormalJobHandles.Dispose();
-            if (updateMeshUvJobHandles.IsCreated) updateMeshUvJobHandles.Dispose();
+            if (m_UpdateCounter.IsCreated) m_UpdateCounter.Dispose();
 
             if (productParams.IsCreated) productParams.Dispose();
             if (skinSplitParams.IsCreated) skinSplitParams.Dispose();
-            
+
             m_rigiAddQueue?.Clear();
             m_rigiRemoveQueue?.Clear();
             m_rigiUpdateQueue?.Clear();
@@ -323,6 +354,7 @@ namespace UnityEngine.PBD
             m_forceAddQueue?.Clear();
             m_forceRemoveQueue?.Clear();
             m_forceUpdateQueue?.Clear();
+            
         }
 
         //-------------------------------------------------
@@ -336,10 +368,10 @@ namespace UnityEngine.PBD
 
             if (m_rigiRemoveQueue.Contains(pbdCollider))
                 return false;
-                
-            
+
+
             m_rigiAddQueue?.Enqueue(pbdCollider);
-                
+
             return true;
         }
 
@@ -347,13 +379,13 @@ namespace UnityEngine.PBD
         {
             if (pbdCollider == null || !colliderListIsCreat)
                 return false;
-            
+
             if (m_rigiRemoveQueue.Contains(pbdCollider))
                 return false;
 
             if (m_rigiAddQueue.Contains(pbdCollider))
                 return false;
-            
+
             m_rigiRemoveQueue?.Enqueue(pbdCollider);
             return true;
         }
@@ -362,10 +394,10 @@ namespace UnityEngine.PBD
         {
             if (pbdCollider == null || !colliderListIsCreat)
                 return false;
-            
+
             if (m_rigiUpdateQueue.Contains(pbdCollider))
                 return false;
-            
+
             m_rigiUpdateQueue?.Enqueue(pbdCollider);
             return true;
         }
@@ -376,7 +408,8 @@ namespace UnityEngine.PBD
                 return;
             if (!colliderListIsCreat)
                 return;
-            bool bUpdate = m_rigiAddQueue.Count > 0;
+
+            bool bUpdate = false;
             while (m_rigiAddQueue.TryDequeue(out var pbdCollider))
             {
                 var isCollider = pbdCollider is PBDCustomCollider;
@@ -385,12 +418,16 @@ namespace UnityEngine.PBD
                     int id = pbdCollider.GetHashCode();
                     if (m_colliderIDsList.Contains(id))
                         continue;
-                    var collider = pbdCollider as PBDCustomCollider;
+
+                    var collider = (PBDCustomCollider)pbdCollider;
                     m_rigibodyColliders.AddNoResize(collider.PbdCustomCollider);
                     m_rigibodyColliderTrasnforms.Add(collider.transform);
                     m_colliderIDsList.AddNoResize(id);
+
+                    bUpdate = true;
                 }
             }
+
             if (bUpdate)
                 InteractionOfLeavesManager.Instance?.UpdateSceneBounds();
         }
@@ -401,7 +438,8 @@ namespace UnityEngine.PBD
                 return;
             if (!colliderListIsCreat)
                 return;
-            bool bUpdate = m_rigiRemoveQueue.Count > 0;
+
+            bool bUpdate = false;
             while (m_rigiRemoveQueue.TryDequeue(out var pbdCollider))
             {
                 var isCollider = pbdCollider is PBDCustomCollider;
@@ -415,9 +453,13 @@ namespace UnityEngine.PBD
                     m_rigibodyColliderTrasnforms.RemoveAtSwapBack(index);
                     m_colliderIDsList.RemoveAtSwapBack(index);
 
-                }
+                    if (m_RigibodyRemoveSequence.IsCreated)
+                        m_RigibodyRemoveSequence.Add(index);
 
+                    bUpdate = true;
+                }
             }
+
             if (bUpdate)
                 InteractionOfLeavesManager.Instance?.UpdateSceneBounds();
         }
@@ -430,22 +472,22 @@ namespace UnityEngine.PBD
             if (!colliderListIsCreat)
                 return;
 
-            bool bUpdate = m_rigiUpdateQueue.Count > 0;
+            bool bUpdate = false;
 
             while (m_rigiUpdateQueue.TryDequeue(out var pbdCollider))
             {
-
                 var isCollider = pbdCollider is PBDCustomCollider;
                 if (isCollider)
                 {
                     int index = m_colliderIDsList.IndexOf(pbdCollider.GetHashCode());
                     if (index < 0)
                         continue;
-                    
-                    var collider = pbdCollider as PBDCustomCollider;
-                    m_rigibodyColliders[index] = collider.PbdCustomCollider;
-                }
 
+                    var collider = (PBDCustomCollider)pbdCollider;
+                    m_rigibodyColliders[index] = collider.PbdCustomCollider;
+
+                    bUpdate = true;
+                }
             }
 
             if (bUpdate)
@@ -454,11 +496,11 @@ namespace UnityEngine.PBD
 
         public void ProcessRigiBodyQueue()
         {
-            ProcessAddColliderInfo();
             ProcessRemoveColliderInfo();
+            ProcessAddColliderInfo();
             ProcessUpdateCollider();
         }
-        
+
         //-----------------------------------------------
 
 
@@ -481,13 +523,13 @@ namespace UnityEngine.PBD
         {
             if (force == null)
                 return false;
-            
+
             if (m_forceRemoveQueue.Contains(force))
                 return false;
 
             if (m_forceAddQueue.Contains(force))
                 return false;
-            
+
             m_forceRemoveQueue?.Enqueue(force);
             return true;
         }
@@ -496,10 +538,10 @@ namespace UnityEngine.PBD
         {
             if (force == null)
                 return false;
-            
+
             if (m_forceUpdateQueue.Contains(force))
                 return false;
-            
+
             m_forceUpdateQueue?.Enqueue(force);
             return true;
         }
@@ -517,8 +559,8 @@ namespace UnityEngine.PBD
                 if (force)
                 {
                     int hash = force.GetHashCode();
-                    
-                    if(m_allForceIDList.Contains(hash))
+
+                    if (m_allForceIDList.Contains(hash))
                         continue;
 
                     PBDForceApplicationOrder order = force.force.Order;
@@ -549,10 +591,10 @@ namespace UnityEngine.PBD
 
         private void ProcessRemoveForceInfo()
         {
-            if(m_forceRemoveQueue == null)
+            if (m_forceRemoveQueue == null)
                 return;
-            
-            if(!forceListIsCreat)
+
+            if (!forceListIsCreat)
                 return;
 
             while (m_forceRemoveQueue.TryDequeue(out var force))
@@ -560,12 +602,12 @@ namespace UnityEngine.PBD
                 int hash = force.GetHashCode();
 
                 int index = m_allForceIDList.IndexOf(hash);
-                
-                if(index < 0)
+
+                if (index < 0)
                     continue;
-                
+
                 PBDForceApplicationOrder order = force.force.Order;
-                
+
                 m_allForceIDList.RemoveAtSwapBack(index);
 
                 switch (order)
@@ -590,56 +632,53 @@ namespace UnityEngine.PBD
                         break;
                 }
             }
-            
         }
 
-        
+
         private void ProcessUpdateForceInfo()
         {
             if (m_forceUpdateQueue == null)
                 return;
-            
-            if(!forceListIsCreat)
+
+            if (!forceListIsCreat)
                 return;
-            
+
             //可能 只需要增删就够用了。。
             // bool bUpdate = m_forceUpdateQueue.Count > 0;
 
             while (m_forceUpdateQueue.TryDequeue(out var force))
             {
                 int hash = force.GetHashCode();
-                
+
                 int index = m_allForceIDList.IndexOf(hash);
-                
-                if(index < 0)
+
+                if (index < 0)
                     continue;
-                
+
                 PBDForceApplicationOrder order = force.force.Order;
-                
+
                 switch (order)
                 {
                     case PBDForceApplicationOrder.PreDynamics:
-                        index = m_preForceIDList.IndexOf(hash);
+                        index                   = m_preForceIDList.IndexOf(hash);
                         m_preForceFields[index] = force.force;
                         break;
                     case PBDForceApplicationOrder.Dynamics:
-                        index = m_forceIDList.IndexOf(hash);
+                        index                = m_forceIDList.IndexOf(hash);
                         m_forceFields[index] = force.force;
                         break;
                     case PBDForceApplicationOrder.PostDynamics:
-                        index = m_postForceIDList.IndexOf(hash);
+                        index                    = m_postForceIDList.IndexOf(hash);
                         m_postForceFields[index] = force.force;
                         break;
                 }
-                
             }
-            
         }
 
         public void ProcessForceQueue()
         {
-            ProcessAddForceInfo();
             ProcessRemoveForceInfo();
+            ProcessAddForceInfo();
             ProcessUpdateForceInfo();
         }
     }

@@ -12,21 +12,21 @@ namespace UnityEngine.PBD
     public class PBDColliderBase : MonoBehaviour
     {
         [_ReadOnlyInPlayMode] public PBDColliderType m_ColliderType = PBDColliderType.None;
-        
+
         [_ReadOnlyInPlayMode] public bool m_bStatic = false;
 
         [_ReadOnlyInPlayMode] public bool m_bStick = true;
 
         [_ReadOnlyInPlayMode] public Vector3 m_Center = float3.zero;
 
-        #region OnBoundsChangedEvent
-        
-        private bool _noRenderCom;
-        private Renderer _renderer;
-        protected Bounds _lastBound;
-        private readonly WaitForSeconds _waitForSeconds = new (0.1f);
-        private Coroutine _wait;
-        
+#region OnBoundsChangedEvent
+
+        private          bool           _noRenderCom;
+        private          Renderer       _renderer;
+        protected        Bounds         _lastBound;
+        private readonly WaitForSeconds _waitForSeconds = new(0.1f);
+        private          Coroutine      _wait;
+
 
         private bool HasBoundsChanged()
         {
@@ -36,7 +36,14 @@ namespace UnityEngine.PBD
                 return false;
             }
 
-            return !_lastBound.Equals(_renderer.bounds);
+            return BoundsEquals();
+            // return !_lastBound.Equals(_renderer.bounds);
+        }
+
+        private bool BoundsEquals()
+        {
+            return Vector3.SqrMagnitude(_lastBound.min - _renderer.bounds.min) > 1e-2 &&
+                   Vector3.SqrMagnitude(_lastBound.max - _renderer.bounds.max) > 1e-2;
         }
 
         private IEnumerator CheckBoundsChange()
@@ -44,43 +51,45 @@ namespace UnityEngine.PBD
             while (true)
             {
                 yield return _waitForSeconds;
-                
+
                 if (HasBoundsChanged())
                 {
                     OnBoundsChangged();
                     _lastBound = _renderer.bounds;
                 }
+
                 if (_noRenderCom)
                     break;
             }
         }
+
         protected virtual void Start()
         {
         }
 
         protected virtual void OnBoundsChangged()
         {
-            if (InteractionOfLeavesManager.IsInstance()) 
+            if (InteractionOfLeavesManager.IsInstance())
                 InteractionOfLeavesManager.Instance?.UpdateColliderInfo(this);
         }
-        
+
         protected virtual void OnEnable()
         {
             //后添加进场景的onEnable能比前面的Awake更早
             // if (InteractionOfLeavesManager.IsInstance()) 
-                InteractionOfLeavesManager.Instance?.RegistRigibody(this);
+            InteractionOfLeavesManager.Instance?.RegistRigibody(this);
             _wait = StartCoroutine(CheckBoundsChange());
         }
 
         protected virtual void OnDisable()
         {
             //..
-            if (InteractionOfLeavesManager.IsInstance()) 
+            if (InteractionOfLeavesManager.IsInstance())
                 InteractionOfLeavesManager.Instance?.UnRegistRigibody(this);
             StopCoroutine(_wait);
         }
 
-        #endregion
+#endregion
 
         protected void InitializeBounds()
         {
@@ -91,10 +100,10 @@ namespace UnityEngine.PBD
             else
                 _lastBound = _renderer.bounds;
         }
-        
+
         protected virtual void OnDrawGizmosSelected()
         {
-            if(Application.isPlaying)
+            if (Application.isPlaying)
             {
                 var bound = _lastBound;
 
@@ -104,9 +113,9 @@ namespace UnityEngine.PBD
 
                 float3
                     ex1 = new float3(-1, -1, -1) * extend,
-                    ex2 = new float3(-1, 1, -1) * extend,
-                    ex3 = new float3(1, 1, -1) * extend,
-                    ex4 = new float3(1, -1, -1) * extend;
+                    ex2 = new float3(-1, 1,  -1) * extend,
+                    ex3 = new float3(1,  1,  -1) * extend,
+                    ex4 = new float3(1,  -1, -1) * extend;
 
                 float3
                     a = center + ex1,
@@ -132,9 +141,6 @@ namespace UnityEngine.PBD
                 Gizmos.DrawLine(c, g);
                 Gizmos.DrawLine(d, h);
             }
-
         }
     }
-
-  
 }

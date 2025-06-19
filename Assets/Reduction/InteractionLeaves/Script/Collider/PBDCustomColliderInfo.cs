@@ -5,7 +5,7 @@ using Unity.Mathematics;
 namespace UnityEngine.PBD
 {
     
-    [BurstCompatible]
+    [GenerateTestsForBurstCompatibility]
     public struct PBDCustomColliderInfo
     {
         public bool bStatic;
@@ -24,14 +24,27 @@ namespace UnityEngine.PBD
         //bounds
         public float3 boundsMin;
         public float3 boundsMax;
+
+        public float4 _lastFramePosition;
+        private float3 _selfSpeed;
         
         //world
         public float3 Position;
         public float3 Scale;
         public quaternion Rotation;
+
+        public PBDBounds Bounds => new () { Min = boundsMin, Max = boundsMax };
+
         
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Prepare()
+        public float AddDensityValue(float3 pos)
+        {
+            return math.select(0, math.length(_selfSpeed * _lastFramePosition.w), 
+                               MathematicsUtil.AABBContains(pos, boundsMin, boundsMax));
+        }
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Prepare(float deltaTimeInv = 0)
         {
             switch (CollideType)
             {
@@ -48,6 +61,10 @@ namespace UnityEngine.PBD
                 default:
                     break;
             }
+
+            _selfSpeed = (Position - _lastFramePosition.xyz) * deltaTimeInv;
+
+            _lastFramePosition.xyz = Position;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -139,7 +156,8 @@ namespace UnityEngine.PBD
                         min = math.min(min, corner4);
                         max = math.max(max, corner4);
                         
-                        float minThickness = 0.5f; // 厚度阈值
+                        // float minThickness = 0.1f; // 厚度阈值
+                        float minThickness = 0.0f; // 厚度阈值
                         float3 size = max - min;
         
                         float currentThickness = math.min(math.min(size.x, size.y),size.z);
@@ -176,7 +194,7 @@ namespace UnityEngine.PBD
             ref var c = ref this;
             float scale = c.ScaleSize.x;//lossyScale.x
             float 
-                halfHeight = c.Size.x * 0.5f,
+                halfHeight = c.Size.x * 0.5f,//height没乘scale 艹
                 Radius = c.Size.y,
                 Radius2 = c.Size.z;
 
@@ -225,43 +243,41 @@ namespace UnityEngine.PBD
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool Collide(in float3 particlePosition, float particleRadius, float elasticity, float friction, ref PointConstraints delta, in int index, ref float3 velocity, ref PBDCollisionHit hit)
+        public bool Collide(in float3 particlePosition, float particleRadius, float elasticity, float friction,ref float3 velocity, ref PBDCollisionHit hit)
         {
             switch (CollideType)
             {
                 case PBDColliderType.Plane:
                     return PBDCollisionUtil.OutsidePlane(in particlePosition, particleRadius, in C0,
-                        in Up, in Forward, in Right, in ScaleSize, false,
-                        ref delta, index, ref velocity, ref hit,
+                        in Up, in Forward, in Right, in ScaleSize,
+                        ref velocity, ref hit,
                         elasticity, friction, useConcatNormal);
                 case PBDColliderType.Box:
                     return PBDCollisionUtil.OutsideBox(in particlePosition, particleRadius, in C0,
                         in Up, in Forward, in Right, in ScaleSize,
-                        ref delta, index, ref velocity, ref hit,
+                        ref velocity, ref hit,
                         elasticity, friction, useConcatNormal);
                 
                 case PBDColliderType.Sphere:
                     return PBDCollisionUtil.OutsideSphere(in particlePosition, particleRadius,
                         C0, ScaleSize.y,
-                        ref delta, index, ref velocity, ref hit,
+                        ref velocity, ref hit,
                         elasticity, friction, useConcatNormal);
                 case PBDColliderType.Capsule:
                     return PBDCollisionUtil.OutsideCapsule(in particlePosition, particleRadius,
                         C0, Up,
                         ScaleSize.y, ScaleSize.w,
-                        ref delta, index, ref velocity, ref hit,
+                        ref velocity, ref hit,
                         elasticity, friction, useConcatNormal);
                 case PBDColliderType.AsymmetricalCapsule:
                     return PBDCollisionUtil.OutsideCapsule2(in particlePosition, particleRadius,
                         C0, Up,
                         ScaleSize.y, ScaleSize.z, ScaleSize.w,
-                        ref delta, in index, ref velocity, ref hit,
+                        ref velocity, ref hit,
                         elasticity, friction, useConcatNormal);
             }
 
             return false;
         }
-
-
     }
 }

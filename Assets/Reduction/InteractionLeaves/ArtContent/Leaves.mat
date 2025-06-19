@@ -113,7 +113,7 @@ Material:
     - _WorkflowMode: 1
     - _WorldNormalBasic: 0
     - _ZBasic: 0.03
-    - _ZBias: 0.001
+    - _ZBias: 0.002
     - _ZWrite: 1
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}

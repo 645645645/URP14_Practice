@@ -1,8 +1,11 @@
 using System.Runtime.CompilerServices;
+using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine.Jobs;
+using UnityEngine.PBD;
 
 
+[GenerateTestsForBurstCompatibility]
 public static class MathematicsUtil
 {
     public const float PI = 3.14159265f;
@@ -18,6 +21,9 @@ public static class MathematicsUtil
     public static readonly float3 up = new float3(0, 1, 0);
     public static readonly float3 forward = new float3(0, 0, 1);
     public static readonly float3 one = new float3(1, 1, 1);
+
+    public static readonly float4   one4   = new(one, 1);
+    public static readonly float3x4 one3x4 = new(one, one, one, one);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int bitmask(bool2 value)
@@ -47,6 +53,24 @@ public static class MathematicsUtil
         if (value.z) mask |= 0x04;
         if (value.w) mask |= 0x08;
         return mask;
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int NextPowerOfTwo(int num)
+    {
+        if (0 == num--)
+        {
+            return 1;
+        }
+
+        num = (num >> 1)  | num;
+        num = (num >> 2)  | num;
+        num = (num >> 4)  | num;
+        num = (num >> 8)  | num;
+        num = (num >> 16) | num;
+        //num = (num >> 32) | num;//如果是64位机器则需要增加一次计算
+        
+        return ++num;
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -115,21 +139,21 @@ public static class MathematicsUtil
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float Length(float2 vec)
     {
-        float lengthSQ = math.lengthsq(vec);
+        double lengthSQ = math.dot(vec, vec);
         return lengthSQ > math.EPSILON ? (float)math.sqrt(lengthSQ) : 0f;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float Length(float3 vec)
     {
-        float lengthSQ = math.lengthsq(vec);
+        double lengthSQ = math.dot(vec, vec);
         return lengthSQ > math.EPSILON ? (float)math.sqrt(lengthSQ) : 0f;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float Length(float4 vec)
     {
-        float lengthSQ = math.lengthsq(vec);
+        double lengthSQ = math.dot(vec, vec);
         return lengthSQ > math.EPSILON ? (float)math.sqrt(lengthSQ) : 0f;
     }
 
@@ -338,7 +362,7 @@ public static class MathematicsUtil
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static float3 RotatePointAroundAxis(float3 point, float3 ori, float3 axis, float angle)
+    public static float3 RotatePointAroundAxis(in float3 point, in float3 ori, float3 axis, float angle)
     {
         axis = Normalize(axis);
         quaternion rotation = quaternion.AxisAngle(axis, angle);
@@ -406,12 +430,39 @@ public static class MathematicsUtil
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool AABBOverlap(in PBDBounds a, in PBDBounds b)
+    {
+        return (a.Max.x >= b.Min.x && a.Min.x <= b.Max.x) &&
+               (a.Max.y >= b.Min.y && a.Min.y <= b.Max.y) &&
+               (a.Max.z >= b.Min.z && a.Min.z <= b.Max.z);
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool AABBContains(in PBDBounds outer, in PBDBounds inner)
+    {
+        return math.all(inner.Min >= outer.Min) && math.all(inner.Max <= outer.Max);
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool AABBContains(in float3 point, in PBDBounds inner)
+    {
+        return math.all(point >= inner.Min) && math.all(point <= inner.Max);
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool AABBContains(in float3 point, in float3 Min,in float3 Max)
+    {
+        return math.all(point >= Min) && math.all(point <= Max);
+    }
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float2 UnitVectorToOctahedron(float3 N)
     {
         float2 Oct = N.xy;
         if (N.z < 0)
         {
-            Oct = (1 - math.abs(N.yx)) * new  float2(N.x >= 0 ? 1 : -1, N.y >= 0 ? 1 : -1);
+//            Oct = (1 - math.abs(N.yx)) * new  float2(N.x >= 0 ? 1 : -1, N.y >= 0 ? 1 : -1);
+            Oct = (1 - math.abs(N.yx)) * math.select(-1f, 1f, N.xy >= 0);
         }
         return Oct;
     }

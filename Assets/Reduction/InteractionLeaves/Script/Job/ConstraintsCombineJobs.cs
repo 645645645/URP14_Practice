@@ -8,344 +8,221 @@ using UnityEngine.Jobs;
 
 namespace UnityEngine.PBD
 {
-    
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct FillTrianglesJobUShort : IJobParallelFor
-    {
-        //常驻 只生成一次
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeSlice<ushort> triangles;
-
-        public void Execute(int index)
-        {
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
-            int3 traingesA = math.mad(index, 6, new int3(0, 1, 2));
-            int3 traingesB = math.mad(index, 6, new int3(3, 4, 5));
-            
-            triangles[traingesA.x] = (ushort)indices[0];
-            triangles[traingesA.y] = (ushort)indices[2];
-            triangles[traingesA.z] = (ushort)indices[1];
-            triangles[traingesB.x] = (ushort)indices[1];
-            triangles[traingesB.y] = (ushort)indices[2];
-            triangles[traingesB.z] = (ushort)indices[3];
-        }
-    }
-    
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct FillTrianglesJobUInt : IJobParallelFor
-    {
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeSlice<uint> triangles;
-
-        public void Execute(int index)
-        {
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
-            int3 traingesA = math.mad(index, 6, new int3(0, 1, 2));
-            int3 traingesB = math.mad(index, 6, new int3(3, 4, 5));
-            
-            triangles[traingesA.x] = (uint)indices[0];
-            triangles[traingesA.y] = (uint)indices[2];
-            triangles[traingesA.z] = (uint)indices[1];
-            triangles[traingesB.x] = (uint)indices[1];
-            triangles[traingesB.y] = (uint)indices[2];
-            triangles[traingesB.z] = (uint)indices[3];
-        }
-    }
-
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct CreatQuadMeshDataAppendJob : IJobParallelFor
-    {
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<DistanceConstraint> distanceConstraints;
-
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<BendConstraint> bendConstraints;
-
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PredictedPositions> PredictedPositions;
-
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<Velocity> Velocities;
-
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<Normal> Normals;
-        
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<Radius> Radius;
-
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<InvMass> InvMasses;
-        
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<QuadInvMass> QuadInvMasses;
-
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<Area> Areas;
-
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<IsNeedUpdate> IsNeedUpdates;
-
-        //mesh ===============
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<float3> vertices;
-        
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<float2> normal;
-
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeSlice<half2> uvs;
-        //===================
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<float4>.ReadOnly skinParams;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<float3>.ReadOnly productMinMax;
-
-        [ReadOnly] public float4x4 local2World;
-
-        [ReadOnly] public int offset; //生成
-
-        [ReadOnly] public float Radius2Rigibody;
-
-        public void Execute(int index)
-        {
-            index += offset;
-            index %= IsNeedUpdates.Length;
-            int vertexStart = index * 4;
-
-            var random = Unity.Mathematics.Random.CreateFromIndex((uint)vertexStart);
-
-            int type = random.NextInt(0, skinParams.Length);
-            float4 uvST = skinParams[type];
-
-            float3 pos = random.NextFloat3(productMinMax[0], productMinMax[1]);
-
-            // quaternion rot = quaternion.Euler(pos * 30);
-            quaternion rot = random.NextQuaternionRotation();
-
-            float3 foldAngleRange = productMinMax[2];
-            float2 scaleRange = productMinMax[3].xy;
-            float2 massRange = productMinMax[4].xy;
-            float scale = random.NextFloat(scaleRange.x, scaleRange.y);
-            float angle = random.NextFloat(foldAngleRange.x, foldAngleRange.y);
-            float mass = random.NextFloat(massRange.x, massRange.y);
-            float radius = random.NextFloat(scaleRange.x, scaleRange.y);
-            radius *= (0.25f * Radius2Rigibody);
-
-            CreatQuadMeshData(index, vertexStart, uvST, radius,
-                pos, rot, scale, angle, type, mass);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void CreatQuadMeshData(int quadID, int verticesOffset, float4 uvST, float radius,
-            float3 pos, quaternion rot, float scale, float curveAngele, int type, float mass)
-        {
-            int index0 = 0 + verticesOffset,
-                index1 = 1 + verticesOffset,
-                index2 = 2 + verticesOffset,
-                index3 = 3 + verticesOffset;
-
-            float3 p0 = new float3(0, 0, 0);
-            float3 p1 = new float3(1, 0, 0);
-            float3 p2 = new float3(0, 0, 1);
-            float3 p3 = new float3(1, 0, 1);
-
-            //对折
-            p3 = MathematicsUtil.RotatePointAroundAxis(p3, p1, p1 - p2, curveAngele);
-
-            float4x4 trs = float4x4.TRS(pos, rot, scale);
-            p0 = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(p0, 1));
-            p1 = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(p1, 1));
-            p2 = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(p2, 1));
-            p3 = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(p3, 1));
-
-            p0 = MathematicsUtil.MatrixMultiplyPoint3x4(local2World, new float4(p0, 1));
-            p1 = MathematicsUtil.MatrixMultiplyPoint3x4(local2World, new float4(p1, 1));
-            p2 = MathematicsUtil.MatrixMultiplyPoint3x4(local2World, new float4(p2, 1));
-            p3 = MathematicsUtil.MatrixMultiplyPoint3x4(local2World, new float4(p3, 1));
-
-            float3
-                a = (p0 - p1),
-                b = (p2 - p1),
-                c = (p3 - p1),
-                d = (p0 - p2),
-                e = (p3 - p2);
-
-            int dStart = quadID * 5;
-            CreatDistanceConstraint(dStart, a, b, c, d, e);
-
-            float3 perpA = math.cross(a, b);
-            float3 perpB = math.cross(b, c);
-            float perpLenA = math.length(perpA);
-            float perpLenB = math.length(perpB);
-            float areaA = perpLenA * 0.5f;
-            float areaB = perpLenB * 0.5f;
-            float areaP = (areaA + areaB) * 0.5f;
-
-            float3 na = perpA / perpLenA;
-            float3 nb = perpB / perpLenB;
-            float3 np = math.normalize(na + nb);
-
-            float dot = math.clamp(math.dot(na, nb), -1, 1);
-            float angle = math.acos(dot);
-
-            bendConstraints[quadID] = new BendConstraint()
-            {
-                // index0 = index0,
-                // index1 = index1,
-                // index2 = index2,
-                // index3 = index3,
-                restAngle = angle, // rad
-                // isUpdate = isUpdate,
-            };
-
-            //把Create放流程末尾就得更新mesh..
-            vertices[index0] = p0;
-            vertices[index1] = p1;
-            vertices[index2] = p2;
-            vertices[index3] = p3;
-            
-            float2 
-                octNA = MathematicsUtil.UnitVectorToOctahedron(na),
-                octNB = MathematicsUtil.UnitVectorToOctahedron(nb),
-                octNP = MathematicsUtil.UnitVectorToOctahedron(np);
-            
-            normal[index0] = octNA;
-            normal[index1] = octNP;
-            normal[index2] = octNP;
-            normal[index3] = octNB;
-
-            uvs[index0] = new half2(math.mad(new float2(0, 0), uvST.xy, uvST.zw));
-            uvs[index1] = new half2(math.mad(new float2(1, 0), uvST.xy, uvST.zw));
-            uvs[index2] = new half2(math.mad(new float2(0, 1), uvST.xy, uvST.zw));
-            uvs[index3] = new half2(math.mad(new float2(1, 1), uvST.xy, uvST.zw));
-
-            float density;
-
-            switch (type)
-            {
-                case 0:
-                    density = 1.2f;
-                    break;
-                case 1:
-                    density = 1;
-                    break;
-                case 2:
-                    density = 1.4f;
-                    break;
-                case 3:
-                    density = 1.2f;
-                    break;
-                default:
-                    density = 1.5f;
-                    break;
-            }
-
-            mass = mass * density * 0.008f;
-            // mass = mass * density * areaP;   
-
-            float 
-                invMass0 = 2.4f / mass,
-                invMass1 = 2.9f / mass,
-                invMass2 = 1.6f / mass,
-                invMass3 = 2f / mass;
-
-            // float quadInvMass = 1.0f / (mass * (1.0f / 2.4f + 1.0f / 2.9f + 1.0f / 1.6f + 1.0f / 2.0f));
-            float quadInvMass = 1.0f / (mass * 1.886494f);
-
-            QuadInvMasses[quadID] = new QuadInvMass() { Value = quadInvMass };
-            Radius[quadID] = new Radius() { Value = radius };
-
-            CreatParticleDataAppend(index0, p0, na, invMass0, areaA);
-            CreatParticleDataAppend(index1, p1, na, invMass1, areaP);
-            CreatParticleDataAppend(index2, p2, nb, invMass2, areaP);
-            CreatParticleDataAppend(index3, p3, nb, invMass3, areaB);
-            IsNeedUpdates[quadID] = new IsNeedUpdate() { Value = true };
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void CreatParticleDataAppend(int index,
-            float3 pos, float3 nor, float invMass, float area)
-        {
-            PredictedPositions[index] = new PredictedPositions() { Value = pos };
-            Velocities[index] = new Velocity() { Value = float3.zero };
-            Normals[index] = new Normal() { Value = nor };
-            InvMasses[index] = new InvMass() { Value = invMass };
-            Areas[index] = new Area() { Value = area };
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void CreatDistanceConstraint(int dStart, float3 a, float3 b, float3 c, float3 d, float3 e)
-        {
-            distanceConstraints[dStart] = new DistanceConstraint() { restLength = math.length(a) };
-            distanceConstraints[dStart + 1] = new DistanceConstraint() { restLength = math.length(b) };
-            distanceConstraints[dStart + 2] = new DistanceConstraint() { restLength = math.length(c) };
-            distanceConstraints[dStart + 3] = new DistanceConstraint() { restLength = math.length(d) };
-            distanceConstraints[dStart + 4] = new DistanceConstraint() { restLength = math.length(e) };
-        }
-    }
-
-
     //记录模拟开始前位置
     [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct InitializeJob : IJobParallelFor
+    public struct InitializeJob : IJobParallelForBatch
     {
-        [ReadOnly, NativeDisableParallelForRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
         public NativeArray<int>.ReadOnly UpdateList;
-        
+
         [WriteOnly, NativeDisableParallelForRestriction]
         public NativeArray<Position> Positions;
 
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
 
-        public void Execute(int index)
+        public unsafe void Execute(int start, int count)
         {
-            index = UpdateList[index];
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
-            for (int i = 0; i < 4; i++)
+            var size = UnsafeUtility.SizeOf<Position>() * 4;
+            
+            var updatePtr = (int*)UpdateList.GetUnsafeReadOnlyPtr();
+            var source    = (PredictedPositions*)PredictedPositions.GetUnsafeReadOnlyPtr();
+            var dest      = (Position*)Positions.GetUnsafePtr();
+            for (int index = start; index < start + count; index++)
             {
-                int indexs = indices[i];
-                Positions[indexs] = new Position() { Value = PredictedPositions[indexs].Value };
+                int offset = updatePtr[index] * 4;
+
+                UnsafeUtility.MemCpy(destination: dest + offset,
+                                     source: source    + offset,
+                                     size: size);
             }
         }
     }
 
+
     #region ExtForce
 
-
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
+    [BurstCompile(FloatPrecision.Low, FloatMode.Default)]
     public struct ReadForceTransformJob : IJobParallelForTransform
     {
-        [NativeDisableParallelForRestriction]
+        [NativeDisableParallelForRestriction] 
         public NativeList<PBDForceField> ForceFields;
 
         [ReadOnly] public float DeltaTime;
-        
+
         public void Execute(int index, TransformAccess transform)
         {
             if (transform.isValid)
             {
-                PBDForceField force = ForceFields[index];
+                ref var force = ref ForceFields.ElementAt(index);
                 force.loacl2World = transform.localToWorldMatrix;
-                force.DeltaTime = DeltaTime;
+                force.DeltaTime   = DeltaTime;
                 force.Prepare();
-                ForceFields[index] = force;
+            }
+        }
+    }
+
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance,
+                  FloatMode = FloatMode.Fast, CompileSynchronously = true,
+                  FloatPrecision = FloatPrecision.Low, DisableSafetyChecks = true)]
+    public struct ExtForceJob : IJobParallelForBatch
+    {
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
+        public NativeArray<int>.ReadOnly UpdateList;
+
+        [NativeDisableParallelForRestriction] 
+        public NativeArray<PredictedPositions> PredictedPositions;
+
+        [NativeDisableParallelForRestriction] 
+        public NativeArray<Velocity> Velocities;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<Normal>.ReadOnly Normals;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<InvMass>.ReadOnly InvMasses;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<Area>.ReadOnly Areas;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<PBDForceField>.ReadOnly ForceFields;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<PBDForceField>.ReadOnly PostForceFields;
+
+        [ReadOnly] public float3 gravity;
+        [ReadOnly] public float3 wind;
+        [ReadOnly] public float damping;
+        [ReadOnly] public float deltaTime;
+
+        public unsafe void Execute(int start, int count)
+        {
+            var sizeF1 = UnsafeUtility.SizeOf<float>();
+            int sizeF4  = sizeF1 * 4,
+                sizeF34 = sizeF1 * 12;
+            
+            var updatePtr  = (int*)UpdateList.GetUnsafeReadOnlyPtr();
+            var posPtr     = (PredictedPositions*)PredictedPositions.GetUnsafeReadOnlyPtr();
+            var veloPtr    = (Velocity*)Velocities.GetUnsafePtr();
+            var normalPtr  = (Normal*)Normals.GetUnsafeReadOnlyPtr();
+            var invMassPtr = (InvMass*)InvMasses.GetUnsafeReadOnlyPtr();
+            var areaPtr    = (Area*)Areas.GetUnsafeReadOnlyPtr();
+            var forcePtr    = (PBDForceField*)ForceFields.GetUnsafeReadOnlyPtr();
+            var pForcePtr    = (PBDForceField*)PostForceFields.GetUnsafeReadOnlyPtr();
+            
+            
+            for (int index = start; index < start + count; index++)
+            {            
+                int quadID  = updatePtr[index];
+                int offset = quadID * 4;
+
+                float3x4
+                    positons,
+                    normals,
+                    velocities;
+                    
+                float4 areaes,
+                       invMasses;
+
+                UnsafeUtility.MemCpy(&positons, posPtr    + offset, sizeF34);
+                UnsafeUtility.MemCpy(&normals, normalPtr  + offset, sizeF34);
+                UnsafeUtility.MemCpy(&velocities, veloPtr + offset, sizeF34);
+
+                UnsafeUtility.MemCpy(&areaes, areaPtr       + offset, sizeF4);
+                UnsafeUtility.MemCpy(&invMasses, invMassPtr + offset, sizeF4);
+
+                float4 winDotN = new float4()
+                {
+                    x = math.dot(velocities[0] - wind, normals[0]),
+                    y = math.dot(velocities[1] - wind, normals[1]),
+                    z = math.dot(velocities[2] - wind, normals[2]),
+                    w = math.dot(velocities[3] - wind, normals[3]),
+                };
+
+                float4 tempF = winDotN * areaes;
+
+                float3x4 forces = new float3x4(normals.c0 * tempF[0],
+                                               normals.c1 * tempF[1],
+                                               normals.c2 * tempF[2],
+                                               normals.c3 * tempF[3]);
+
+                for (int i = 0; i < ForceFields.Length; i++)
+                {
+                    for (int j = 0; j < 4; j++)
+                        forces[j] += forcePtr[i].CaculateForce(in positons[j], in velocities[j]);
+                }
+
+                for (int i = 0; i < 4; i++)
+                {
+                    velocities[i] += (forces[i] * invMasses[i] + gravity) * deltaTime;
+                    velocities[i] *= math.max(-damping * invMasses[i] * deltaTime + 1, 0);
+                }
+                
+                for (int i = 0; i < PostForceFields.Length; i++)
+                {
+                    for (int j = 0; j < 4; j++)
+                        velocities[j] += pForcePtr[i].CaculateForce(in positons[j], in velocities[j]);
+                }
+
+                for (int i = 0; i < 4; i++)
+                {
+                    positons[i] += velocities[i] * deltaTime;
+                }
+
+                UnsafeUtility.MemCpy(posPtr + offset, &positons, sizeF34);
+                UnsafeUtility.MemCpy(veloPtr + offset, &velocities, sizeF34);
+
+                // int4 indices = math.mad(quadID, 4, new int4(0, 1, 2, 3));
+                // for (int i = 0; i < 4; i++)
+                // {
+                //     int pIndex = indices[i];
+                //
+                //     float3
+                //         position = PredictedPositions[pIndex].Value,
+                //         normal   = Normals[pIndex].Value,
+                //         velocity = Velocities[pIndex].Value;
+                //
+                //     float
+                //         area     = Areas[pIndex].Value,
+                //         invMass  = InvMasses[pIndex].Value,
+                //         windDotN = math.dot(velocity - wind, normal);
+                //
+                //     if (windDotN < 0)
+                //     {
+                //         //好像做了个屁事
+                //         normal   *= -1;
+                //         windDotN *= -1;
+                //     }
+                //
+                //     float3 force = windDotN * normal * area;
+                //     for (int j = 0; j < ForceFields.Length; j++)
+                //         force += ForceFields[j].CaculateForce(in position, in velocity);
+                //
+                //     //重力应该分到PreDynamic
+                //     velocity += (force * invMass + gravity) * deltaTime;
+                //     velocity *= math.max(-damping * invMass * deltaTime + 1, 0);
+                //     // velocity *= math.exp(-damping * invMass * deltaTime);
+                //
+                //     for (int j = 0; j < PostForceFields.Length; j++)
+                //         velocity += PostForceFields[j].CaculateForce(in position, in velocity);
+                //
+                //     position = velocity * deltaTime + position;
+                //
+                //     Velocities[pIndex]         = new Velocity() { Value           = velocity };
+                //     PredictedPositions[pIndex] = new PredictedPositions() { Value = position };
+                // }
             }
         }
     }
     
-    //力场激活static部分,不过滤用的
-    //开了byQuad就用上一帧碰撞前的quadPos
+//    力场激活static部分, 朴素ext模式
+//    开了byQuad就(划掉) 用上一帧碰撞前的quadPos
     [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct ExtForceSetUpdateJob : IJobParallelFor
+    public struct ExtForceSetUpdateJob : IJobParallelForBatch
     {
-        [ReadOnly, NativeDisableParallelForRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
         public NativeArray<int>.ReadOnly StaticList;
-        
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
         
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<QuadPredictedPositions>.ReadOnly QuadPredictedPositions;
@@ -360,45 +237,27 @@ namespace UnityEngine.PBD
         
         [WriteOnly, NativeDisableParallelForRestriction]
         public NativeArray<IsNeedUpdate> IsNeedUpdates;
-        
-        
-        [ReadOnly] public bool ByQuad;
-        
-        public void Execute(int index)
-        {
-            if(StaticList.Length < 1 || ForceFields.Length < 1)
-                return;
-            
-            index = StaticList[index];
 
-            if (ByQuad)
-                SetUpdateByQuad(index);
-            else
-                SetUpdateByParticle(index);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void SetUpdateByQuad(int index)
+        public void Execute(int start, int count)
         {
-            float3 pos = QuadPredictedPositions[index].Value;
-            
-            IsSetUpdate(index, pos);
-        }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void SetUpdateByParticle(int index)
-        {
-            int start = index * 4;
-            float3 pos = float3.zero;
-            for (int i = start; i < start + 4; i++)
+            for (int index = start; index < start + count; index++)
             {
-                pos += PredictedPositions[i].Value;
+                int quadID = StaticList[index];
+
+                float3 pos = QuadPredictedPositions[quadID].Value;
+                
+                
+                for (int i = 0; i < ForceFields.Length; i++)
+                {
+                    if (ForceFields[i].IsInRange(pos))
+                    {
+                        IsNeedUpdates[quadID] = new IsNeedUpdate() { Value = true };
+                        break;
+                    }
+                }
             }
-            pos *= 0.25f;
-
-            IsSetUpdate(index, pos);
         }
-
         
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void IsSetUpdate(int index, in float3 pos)
@@ -449,46 +308,55 @@ namespace UnityEngine.PBD
         
         public void Execute()
         {
-            if(ForceFields.Length < 1)
-                return;
+//            if(ForceFields.Length < 1)
+//                return;
 
             if (ByQuad)
+                SetUpdateByQuad();
+            else
+                SetUpdateByParticle();
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void SetUpdateByQuad()
+        {
+            for (int index = 0; index < QuadCount; index++)
             {
-                for (int index = 0; index < QuadCount; index++)
+                float3 pos = QuadPredictedPositions[index].Value;
+
+                for (int i = 0; i < ForceFields.Length; i++)
                 {
-                    float3 pos = QuadPredictedPositions[index].Value;
-                    for (int i = 0; i < ForceFields.Length; i++)
+                    if (ForceFields[i].IsInRange(pos))
                     {
-                        if (ForceFields[i].IsInRange(pos))
-                        {
-                            IsNeedUpdates[index] = new IsNeedUpdate() { Value = true };
-                            ExtDynamicForceList.AddNoResize(index);
-                            break;
-                        }
+                        IsNeedUpdates[index] = new IsNeedUpdate() { Value = true };
+                        ExtDynamicForceList.AddNoResize(index);
+                        break;
                     }
                 }
             }
-            else
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void SetUpdateByParticle()
+        {
+            for (int index = 0; index < QuadCount; index++)
             {
-                for (int index = 0; index < QuadCount; index++)
+                int    start = index * 4;
+                float3 pos   = float3.zero;
+                for (int i = start; i < start + 4; i++)
                 {
-                    int start = index * 4;
-                    float3 pos = float3.zero;
-                    for (int i = start; i < start + 4; i++)
-                    {
-                        pos += PredictedPositions[i].Value;
-                    }
+                    pos += PredictedPositions[i].Value;
+                }
 
-                    pos *= 0.25f;
+                pos *= 0.25f;
 
-                    for (int i = 0; i < ForceFields.Length; i++)
+                for (int i = 0; i < ForceFields.Length; i++)
+                {
+                    if (ForceFields[i].IsInRange(pos))
                     {
-                        if (ForceFields[i].IsInRange(pos))
-                        {
-                            IsNeedUpdates[index] = new IsNeedUpdate() { Value = true };
-                            ExtDynamicForceList.AddNoResize(index);
-                            break;
-                        }
+                        IsNeedUpdates[index] = new IsNeedUpdate() { Value = true };
+                        ExtDynamicForceList.AddNoResize(index);
+                        break;
                     }
                 }
             }
@@ -519,134 +387,67 @@ namespace UnityEngine.PBD
         
         public void Execute()
         {
-            if(PostForceFields.Length < 1)
-                return;
+//            if(PostForceFields.Length < 1)
+//                return;
 
             if (ByQuad)
-            {
-                for (int index = 0; index < QuadCount; index++)
-                {
-                    float3 pos = QuadPredictedPositions[index].Value;
-
-                    for (int i = 0; i < PostForceFields.Length; i++)
-                    {
-                        if (PostForceFields[i].IsInRange(pos))
-                        {
-                            // IsNeedUpdates[index] = new IsNeedUpdate() { Value = true };
-                            ExtPostDynamicForceList.AddNoResize(index);
-                            break;
-                        }
-                    }
-                }
-            }
+                SetUpdateByQuad();
             else
-            {
-                for (int index = 0; index < QuadCount; index++)
-                {
-                    int start = index * 4;
-                    float3 pos = float3.zero;
-                    for (int i = start; i < start + 4; i++)
-                    {
-                        pos += PredictedPositions[i].Value;
-                    }
-
-                    pos *= 0.25f;
-
-                    for (int i = 0; i < PostForceFields.Length; i++)
-                    {
-                        if (PostForceFields[i].IsInRange(pos))
-                        {
-                            // IsNeedUpdates[index] = new IsNeedUpdate() { Value = true };
-                            ExtPostDynamicForceList.AddNoResize(index);
-                            break;
-                        }
-                    }
-                }
-            }
+                SetUpdateByParticle();
         }
-    }
 
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct ExtForceJob : IJobParallelFor
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<int>.ReadOnly UpdateList;
-
-        [NativeDisableParallelForRestriction] 
-        public NativeArray<PredictedPositions> PredictedPositions;
-
-        [NativeDisableParallelForRestriction] 
-        public NativeArray<Velocity> Velocities;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<Normal>.ReadOnly Normals;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<InvMass>.ReadOnly InvMasses;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<Area>.ReadOnly Areas;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PBDForceField>.ReadOnly ForceFields;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PBDForceField>.ReadOnly PostForceFields;
-
-        [ReadOnly] public float3 gravity;
-        [ReadOnly] public float3 wind;
-        [ReadOnly] public float damping;
-        [ReadOnly] public float deltaTime;
-
-        public void Execute(int index)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void SetUpdateByQuad()
         {
-            index = UpdateList[index];
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
-            for (int i = 0; i < 4; i++)
+            for (int index = 0; index < QuadCount; index++)
             {
-                int pIndex = indices[i];
-                
-                float3
-                    position = PredictedPositions[pIndex].Value,
-                    normal = Normals[pIndex].Value,
-                    velocity = Velocities[pIndex].Value,
-                    area = Areas[pIndex].Value;
+                float3 pos = QuadPredictedPositions[index].Value;
 
-                float
-                    invMass = InvMasses[pIndex].Value,
-                    windDotN = math.dot(velocity - wind, normal);
-
-                if (windDotN < 0)
+                for (int i = 0; i < PostForceFields.Length; i++)
                 {
-                    normal *= -1;
-                    windDotN *= -1;
+                    if (PostForceFields[i].IsInRange(pos))
+                    {
+                        // IsNeedUpdates[index] = new IsNeedUpdate() { Value = true };
+                        ExtPostDynamicForceList.AddNoResize(index);
+                        break;
+                    }
                 }
-
-                float3 force = windDotN * normal * area;
-                for (int j = 0; j < ForceFields.Length; j++)
-                    force += ForceFields[j].CaculateForce(in position, in velocity);
-
-                //重力应该分到PreDynamic
-                velocity += (force * invMass + gravity) * deltaTime;
-                velocity *= math.max(-damping * invMass * deltaTime + 1, 0);
-                // velocity *= math.exp(-damping * invMass * deltaTime);
-  
-                for (int j = 0; j < PostForceFields.Length; j++)
-                    velocity += PostForceFields[j].CaculateForce(in position, in velocity);
-
-                position = velocity * deltaTime + position;
-
-                Velocities[pIndex] = new Velocity() { Value = velocity };
-                PredictedPositions[pIndex] = new PredictedPositions() { Value = position };
             }
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void SetUpdateByParticle()
+        {
+            for (int index = 0; index < QuadCount; index++)
+            {
+                int    start = index * 4;
+                float3 pos   = float3.zero;
+                for (int i = start; i < start + 4; i++)
+                {
+                    pos += PredictedPositions[i].Value;
+                }
+
+                pos *= 0.25f;
+
+                for (int i = 0; i < PostForceFields.Length; i++)
+                {
+                    if (PostForceFields[i].IsInRange(pos))
+                    {
+                        // IsNeedUpdates[index] = new IsNeedUpdate() { Value = true };
+                        ExtPostDynamicForceList.AddNoResize(index);
+                        break;
+                    }
+                }
+            }
+        }
+        
     }
 
     //仅计算合力
     [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct ExtPreDynamicForceJob : IJobParallelFor
+    public struct ExtPreDynamicForceJob : IJobParallelFor, IJobParallelForBatch
     {
-        [ReadOnly, NativeDisableParallelForRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
         public NativeArray<int>.ReadOnly UpdateList;
 
         [ReadOnly, NativeDisableParallelForRestriction] 
@@ -665,18 +466,19 @@ namespace UnityEngine.PBD
         // [ReadOnly] public float3 gravity;
         [ReadOnly] public float3 wind;
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Execute(int index)
         {
-            index = UpdateList[index];
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
+            int  quadID  = UpdateList[index];
+            int4 indices = math.mad(quadID, 4, new int4(0, 1, 2, 3));
             for (int i = 0; i < 4; i++)
             {
                 int pIndex = indices[i];
-                
+
                 float3
-                    normal = Normals[pIndex].Value,
+                    normal   = Normals[pIndex].Value,
                     velocity = Velocities[pIndex].Value,
-                    area = Areas[pIndex].Value;
+                    area     = Areas[pIndex].Value;
 
                 float
                     // invMass = InvMasses[i].Value,
@@ -684,19 +486,28 @@ namespace UnityEngine.PBD
 
                 if (windDotN < 0)
                 {
-                    normal *= -1;
+                    normal   *= -1;
                     windDotN *= -1;
                 }
-                
+
                 float3 force = windDotN * normal * area;
 
                 ExtForces[pIndex] = new ExtForce() { Value = force };
             }
         }
+
+        public void Execute(int start, int count)
+        {
+            for (int index = start; index < start + count; index++)
+            {
+                Execute(index);
+            }
+        }
     }
 
+    
     [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct ExtDynamicForceJob : IJobParallelFor
+    public struct ExtDynamicForceJob : IJobParallelFor, IJobParallelForBatch
     {
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<int>.ReadOnly ExtForceList;
@@ -712,31 +523,43 @@ namespace UnityEngine.PBD
         
         [NativeDisableParallelForRestriction]
         public NativeArray<ExtForce> ExtForces;
+
         
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Execute(int index)
         {
-            index = ExtForceList[index];
-            int start = index * 4;
-            for (int i = start; i < start + 4; i++)
+            int  quadID  = ExtForceList[index];
+            int4 indices = math.mad(quadID, 4, new int4(0, 1, 2, 3));
+            for (int i = 0; i < 4; i++)
             {
+                int pIndex = indices[i];
+                    
                 float3
-                    position = PredictedPositions[i].Value,
-                    velocity = Velocities[i].Value,
-                    force = ExtForces[i].Value;
+                    position = PredictedPositions[pIndex].Value,
+                    velocity = Velocities[pIndex].Value,
+                    force    = ExtForces[pIndex].Value;
 
                 for (int j = 0; j < ForceFields.Length; j++)
                     force += ForceFields[j].CaculateForce(in position, in velocity);
-                
-                ExtForces[i] = new ExtForce() { Value = force };
+
+                ExtForces[pIndex] = new ExtForce() { Value = force };
             }
             
+        }
+
+        public void Execute(int start, int count)
+        {
+            for (int index = start; index < start + count; index++)
+            {
+                Execute(index);
+            }
         }
     }
 
     [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct ExtVelocityJob : IJobParallelFor
+    public struct ExtVelocityJob : IJobParallelFor, IJobParallelForBatch
     {
-        [ReadOnly, NativeDisableParallelForRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
         public NativeArray<int>.ReadOnly UpdateList;
 
         [NativeDisableParallelForRestriction] 
@@ -752,17 +575,18 @@ namespace UnityEngine.PBD
         [ReadOnly] public float damping;
         [ReadOnly] public float deltaTime;
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Execute(int index)
         {
-            index = UpdateList[index];
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
+            int  quadID  = UpdateList[index];
+            int4 indices = math.mad(quadID, 4, new int4(0, 1, 2, 3));
             for (int i = 0; i < 4; i++)
             {
                 int pIndex = indices[i];
-                
+
                 float3
                     velocity = Velocities[pIndex].Value,
-                    force = ExtForces[pIndex].Value;
+                    force    = ExtForces[pIndex].Value;
 
                 float
                     invMass = InvMasses[pIndex].Value;
@@ -770,16 +594,24 @@ namespace UnityEngine.PBD
                 velocity += (force * invMass + gravity) * deltaTime;
                 velocity *= math.max(-damping * invMass * deltaTime + 1, 0);
                 // velocity *= math.exp(-damping * invMass * deltaTime);
-                
+
 
                 Velocities[pIndex] = new Velocity() { Value = velocity };
+            }
+        }
+
+        public void Execute(int start, int count)
+        {
+            for (int index = start; index < start + count; index++)
+            {
+                Execute(index);
             }
         }
     }
     
     
     [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct ExtPostDynamicForceJob : IJobParallelFor
+    public struct ExtPostDynamicForceJob : IJobParallelFor, IJobParallelForBatch
     {
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<int>.ReadOnly ExtForceList;
@@ -792,49 +624,59 @@ namespace UnityEngine.PBD
 
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<PBDForceField>.ReadOnly PostForceFields;
-        
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Execute(int index)
         {
-            index = ExtForceList[index];
-            int start = index * 4;
-            for (int i = start; i < start + 4; i++)
-            {
-                float3
-                    position = PredictedPositions[i].Value,
-                    velocity = Velocities[i].Value;
-
-                for (int j = 0; j < PostForceFields.Length; j++)
-                    velocity += PostForceFields[j].CaculateForce(in position, in velocity);
-                
-                Velocities[i] = new Velocity() { Value = velocity };
-            }
-        }
-    }
-    
-
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct ExtPredictedUpdateJob : IJobParallelFor
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<int>.ReadOnly UpdateList;
-
-        [NativeDisableParallelForRestriction]
-        public NativeArray<PredictedPositions> PredictedPositions;
-
-        [ReadOnly, NativeDisableParallelForRestriction] 
-        public NativeArray<Velocity>.ReadOnly Velocities;
-
-        [ReadOnly] public float deltaTime;
-        
-        public void Execute(int index)
-        {
-            index = UpdateList[index];
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
+            int  quadID  = ExtForceList[index];
+            int4 indices = math.mad(quadID, 4, new int4(0, 1, 2, 3));
             for (int i = 0; i < 4; i++)
             {
                 int pIndex = indices[i];
-                
+                    
+                float3
+                    position = PredictedPositions[pIndex].Value,
+                    velocity = Velocities[pIndex].Value;
+
+                for (int j = 0; j < PostForceFields.Length; j++)
+                    velocity += PostForceFields[j].CaculateForce(in position, in velocity);
+
+                Velocities[pIndex] = new Velocity() { Value = velocity };
+            }
+        }
+
+        public void Execute(int start, int count)
+        {
+            for (int index = start; index < start + count; index++)
+            {
+                Execute(index);
+            }
+        }
+    }
+
+
+    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
+    public struct ExtPredictedUpdateJob : IJobParallelFor, IJobParallelForBatch
+    {
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
+        public NativeArray<int>.ReadOnly UpdateList;
+
+        [NativeDisableParallelForRestriction] public NativeArray<PredictedPositions> PredictedPositions;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<Velocity>.ReadOnly Velocities;
+
+        [ReadOnly] public float deltaTime;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Execute(int index)
+        {
+            int  quadID  = UpdateList[index];
+            int4 indices = math.mad(quadID, 4, new int4(0, 1, 2, 3));
+            for (int i = 0; i < 4; i++)
+            {
+                int pIndex = indices[i];
+
                 float3
                     position = PredictedPositions[pIndex].Value,
                     velocity = Velocities[pIndex].Value;
@@ -844,23 +686,236 @@ namespace UnityEngine.PBD
                 PredictedPositions[pIndex] = new PredictedPositions() { Value = position };
             }
         }
+
+        public void Execute(int start, int count)
+        {
+            for (int index = start; index < start + count; index++)
+            {
+                Execute(index);
+            }
+        }
     }
 
 
 
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
+                  FloatPrecision = FloatPrecision.High, CompileSynchronously = true,
+                  /*Debug = true,*/
+                  DisableSafetyChecks = true)]
+    public unsafe struct ExtWindFieldJob : IJobParallelForBatch
+    {
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
+        public NativeArray<int>.ReadOnly UpdateList;
+        
+        [NativeDisableParallelForRestriction] 
+        public NativeArray<PredictedPositions> PredictedPositions;
+
+        [NativeDisableParallelForRestriction] 
+        public NativeArray<Velocity> Velocities;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<Normal>.ReadOnly Normals;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<InvMass>.ReadOnly InvMasses;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<Area>.ReadOnly Areas;
+
+        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        public NativeArray<float>.ReadOnly WindFieldX;
+        
+        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        public NativeArray<float>.ReadOnly WindFieldY;
+        
+        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        public NativeArray<float>.ReadOnly WindFieldZ;
+        
+        // 你怎么还在
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<PBDForceField>.ReadOnly PostForceFields;
+        
+        [ReadOnly] public float3    gravity;
+        [ReadOnly] public float3    wind;//常驻
+        [ReadOnly] public PBDBounds windFieldBounds;
+        [ReadOnly] public float3    windFieldOri;
+        [ReadOnly] public float3    windFieldMoveDelta;
+        [ReadOnly] public int3      dim;
+        [ReadOnly] public int3      N;
+        [ReadOnly] public float     damping;
+        [ReadOnly] public float     deltaTime;
+        
+        public unsafe void Execute(int start, int count)
+        {
+            var sizeF1 = UnsafeUtility.SizeOf<float>();
+            int sizeF4  = sizeF1 * 4,
+                sizeF34 = sizeF1 * 12;
+            
+            var updatePtr  = (int*)UpdateList.GetUnsafeReadOnlyPtr();
+            var posPtr     = (PredictedPositions*)PredictedPositions.GetUnsafeReadOnlyPtr();
+            var veloPtr    = (Velocity*)Velocities.GetUnsafePtr();
+            var normalPtr  = (Normal*)Normals.GetUnsafeReadOnlyPtr();
+            var invMassPtr = (InvMass*)InvMasses.GetUnsafeReadOnlyPtr();
+            var areaPtr    = (Area*)Areas.GetUnsafeReadOnlyPtr();
+            // var forcePtr   = (PBDForceField*)ForceFields.GetUnsafeReadOnlyPtr();
+            var pForcePtr  = (PBDForceField*)PostForceFields.GetUnsafeReadOnlyPtr();
+            
+            float* X = (float*)WindFieldX.GetUnsafeReadOnlyPtr(),
+                   Y = (float*)WindFieldY.GetUnsafeReadOnlyPtr(),
+                   Z = (float*)WindFieldZ.GetUnsafeReadOnlyPtr();
+            
+            for (int index = start; index < start + count; index++)
+            {
+                int quadID = updatePtr[index];
+                int offset = quadID * 4;
+
+                float3x4
+                    positons,
+                    normals,
+                    velocities;
+                    
+                float4 areaes,
+                       invMasses;
+
+                UnsafeUtility.MemCpy(&positons, posPtr    + offset, sizeF34);
+                UnsafeUtility.MemCpy(&normals, normalPtr  + offset, sizeF34);
+                UnsafeUtility.MemCpy(&velocities, veloPtr + offset, sizeF34);
+
+                UnsafeUtility.MemCpy(&areaes, areaPtr       + offset, sizeF4);
+                UnsafeUtility.MemCpy(&invMasses, invMassPtr + offset, sizeF4);
+                
+                
+                float4 winDotN = new float4()
+                {
+                    x = math.dot(velocities[0] - wind, normals[0]),
+                    y = math.dot(velocities[1] - wind, normals[1]),
+                    z = math.dot(velocities[2] - wind, normals[2]),
+                    w = math.dot(velocities[3] - wind, normals[3]),
+                };
+
+                float4 tempF = winDotN * areaes;
+
+                float3x4 forces = new float3x4(normals.c0 * tempF[0],
+                                               normals.c1 * tempF[1],
+                                               normals.c2 * tempF[2],
+                                               normals.c3 * tempF[3]);
+
+                int i;
+                for (i = 0; i < 4; i++)
+                {
+                    float3 p = positons[i] + windFieldMoveDelta;
+                    if(!MathematicsUtil.AABBContains(p, windFieldBounds))
+                        continue;
+                    float3 plocal = (p - windFieldOri);
+
+                    forces[i] += GridUtils.TrilinearStandard(plocal, ref X, ref Y, ref Z, dim);
+                }
+                
+
+                for (i = 0; i < 4; i++)
+                {
+                    velocities[i] += (forces[i] * invMasses[i] + gravity) * deltaTime;
+                    velocities[i] *= math.max(-damping * invMasses[i] * deltaTime + 1, 0);
+                }
+                
+                for (i = 0; i < PostForceFields.Length; i++)
+                {
+                    for (int j = 0; j < 4; j++)
+                        velocities[j] += pForcePtr[i].CaculateForce(in positons[j], in velocities[j]);
+                }
+                
+                
+                for (i = 0; i < 4; i++)
+                {
+                    positons[i] += velocities[i] * deltaTime;
+                }
+                
+
+                UnsafeUtility.MemCpy(posPtr  + offset, &positons, sizeF34);
+                UnsafeUtility.MemCpy(veloPtr + offset, &velocities, sizeF34);
+            }
+        }
+    }
 
 
-    #endregion
+
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
+                  FloatPrecision = FloatPrecision.High, CompileSynchronously = true,
+                  /*Debug = true,*/
+                  DisableSafetyChecks = true)]
+    public unsafe struct ExtWindFieldSetUpdateJob : IJobParallelForBatch
+    {
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
+        public NativeArray<int>.ReadOnly StaticList;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<QuadPredictedPositions>.ReadOnly QuadPredictedPositions;
+        
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<QuadInvMass>.ReadOnly QuadInvMasses;
+
+        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        public NativeArray<float>.ReadOnly WindFieldX;
+        
+        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        public NativeArray<float>.ReadOnly WindFieldY;
+        
+        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        public NativeArray<float>.ReadOnly WindFieldZ;
+
+        [WriteOnly, NativeDisableParallelForRestriction]
+        public NativeArray<IsNeedUpdate> IsNeedUpdates;
+
+        [ReadOnly] public PBDBounds windFieldBounds;
+        [ReadOnly] public float3    windFieldOri;
+        [ReadOnly] public float3    windFieldMoveDelta;
+        [ReadOnly] public int3      dim;
+        [ReadOnly] public int3      N;
+
+        [ReadOnly] public float activeVelocityThreshold;
+
+        public void Execute(int start, int count)
+        {
+            var updatePtr  = (int*)StaticList.GetUnsafeReadOnlyPtr();
+
+            float* X = (float*)WindFieldX.GetUnsafeReadOnlyPtr(),
+                   Y = (float*)WindFieldY.GetUnsafeReadOnlyPtr(),
+                   Z = (float*)WindFieldZ.GetUnsafeReadOnlyPtr();
+
+            for (int index = start; index < start + count; index++)
+            {
+                int quadID = updatePtr[index];
+
+                float3 pos = QuadPredictedPositions[quadID].Value + windFieldMoveDelta;
+                
+                if(!MathematicsUtil.AABBContains(pos, windFieldBounds))
+                    continue;
+                
+                float3 plocal = (pos - windFieldOri);
+
+                float3 wind = GridUtils.TrilinearStandard(plocal, ref X, ref Y, ref Z, dim);
+
+                //速度场当成力场
+                if (math.length(wind) * QuadInvMasses[quadID].Value * 0.01f > activeVelocityThreshold)
+                    IsNeedUpdates[quadID] = new IsNeedUpdate() { Value = true };
+            }
+        }
+    }
+
+#endregion
     
     
     
     #region Distance
-    
 
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct DistanceConstraintJob : IJobParallelFor
+
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
+                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
+                  /*Debug = true,*/
+                  DisableSafetyChecks = true)]
+    public struct DistanceConstraintJob : IJobParallelForBatch
     {
-        [ReadOnly, NativeDisableParallelForRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
         public NativeArray<int>.ReadOnly UpdateList;
 
         [NativeDisableParallelForRestriction] public NativeArray<PredictedPositions> PredictedPositions;
@@ -871,72 +926,91 @@ namespace UnityEngine.PBD
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<DistanceConstraint>.ReadOnly DistanceConstraints;
 
-        [ReadOnly, NativeDisableParallelForRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeFixedLength(5)]
         public NativeArray<int2>.ReadOnly DisContraintIndexes;
 
         [ReadOnly] public float ComppressStiffness;
         [ReadOnly] public float StretchStiffness;
 
-        public void Execute(int index)
+        public unsafe void Execute(int start, int count)
         {
-            index = UpdateList[index];
+            var size = UnsafeUtility.SizeOf<PredictedPositions>() * 4;
             
-            //每个quad五个边约束,输入长度还是quad数量
-            int pStart = index * 4;
-            int dStart = index * 5;
-            for (int i = 0; i < 5; i++)
+            var updatePtr   = (int*)UpdateList.GetUnsafeReadOnlyPtr();
+            var dest        = (PredictedPositions*)PredictedPositions.GetUnsafePtr();
+            var invMassPtr  = (InvMass*)InvMasses.GetUnsafeReadOnlyPtr();
+            var disCnstPtr  = (DistanceConstraint*)DistanceConstraints.GetUnsafeReadOnlyPtr();
+            var disIndexPtr = (int2*)DisContraintIndexes.GetUnsafeReadOnlyPtr();
+            
+            QuadDistanceConstraints quadDistanceConstraints = new QuadDistanceConstraints();
+            
+            for (int index = start; index < start + count; index++)
             {
-                int dIndex = i + dStart;
-                DistanceConstraint cnstr = DistanceConstraints[dIndex];
+                int  quadID  = updatePtr[index];
 
-                // int indexA = cnstr.idA, indexB = cnstr.idB;
-                int2 edge = DisContraintIndexes[i];
-                int indexA = edge.x + pStart,
-                    indexB = edge.y + pStart;
+                int pOffset = quadID * 4,
+                    dOffset = quadID * 5;
 
-                float3 predPosA = PredictedPositions[indexA].Value,
-                    predPosB = PredictedPositions[indexB].Value;
+                float3x4 quadPos;
+                
+                UnsafeUtility.MemCpy(&quadPos, dest + pOffset, size);
+                
+                for (int i = 0; i < 5; i++)
+                {
+                    int                dIndex = i + dOffset;
+                    DistanceConstraint cnstr  = disCnstPtr[dIndex];
 
-                float invMassA = InvMasses[indexA].Value,
-                    invMassB = InvMasses[indexB].Value;
+                    (int indexA, int indexB) = (disIndexPtr[i].x, disIndexPtr[i].y);
 
-                float restLen = cnstr.restLength;
+                    float3 predPosA = quadPos[indexA],
+                           predPosB = quadPos[indexB];
 
-                float3 dir = predPosB - predPosA;
-                float length = math.length(dir);
-                float invMass = invMassA + invMassB;
-                if (invMass <= math.EPSILON || length <= math.EPSILON)
-                    continue;
+                    float invMassA = invMassPtr[indexA].Value,
+                          invMassB = invMassPtr[indexB].Value;
 
-                dir /= length;
+                    float restLen = cnstr.restLength;
 
-                float3 dP = float3.zero;
-                if (length <= restLen) //compress
-                    dP = ComppressStiffness * dir * (length - restLen) / invMass;
-                else //stretch
-                    dP = StretchStiffness * dir * (length - restLen) / invMass;
+                    float3 dir     = predPosB - predPosA;
+                    float  length  = math.length(dir);
+                    float  invMass = invMassA + invMassB;
+                    if (invMass <= math.EPSILON || length <= math.EPSILON)
+                        continue;
 
-                predPosA += dP * invMassA;
-                predPosB -= dP * invMassB;
+                    dir /= length;
 
-                PredictedPositions[indexA] = new PredictedPositions() { Value = predPosA };
-                PredictedPositions[indexB] = new PredictedPositions() { Value = predPosB };
+                    float3 dP = float3.zero;
+                    if (length <= restLen) //compress
+                        dP = ComppressStiffness * dir * (length - restLen) / invMass;
+                    else //stretch
+                        dP = StretchStiffness * dir * (length - restLen) / invMass;
+
+                    quadDistanceConstraints.AddConstraint(indexA, dP  * invMassA);
+                    quadDistanceConstraints.AddConstraint(indexB, -dP * invMassB);
+                }
+
+                quadPos += quadDistanceConstraints.GetDelta();
+
+                UnsafeUtility.MemCpy(dest + pOffset, &quadPos, size);
+
+                quadDistanceConstraints.Clear();
             }
         }
     }
-    
 
-    #endregion
+
+#endregion
     
     
 
     #region Bending
-    
 
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct BendConstraintJob : IJobParallelFor
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
+                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
+                  /*Debug = true,*/
+                  DisableSafetyChecks = true)]
+    public struct BendConstraintJob : IJobParallelForBatch
     {
-        [ReadOnly, NativeDisableParallelForRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
         public NativeArray<int>.ReadOnly UpdateList;
 
         [NativeDisableParallelForRestriction] 
@@ -955,72 +1029,68 @@ namespace UnityEngine.PBD
         public NativeArray<float3> DebugArray;
 #endif
 
-        public void Execute(int index)
+        public unsafe void Execute(int start, int count)
         {
-            index = UpdateList[index];
+            int size     = UnsafeUtility.SizeOf<PredictedPositions>() * 4,
+                massSize = UnsafeUtility.SizeOf<InvMass>()            * 4;
             
-            // int pStart = index * 4,
-            //     bStart = index;
-            BendConstraint cnstr = BendConstraints[index];
+            var updatePtr   = (int*)UpdateList.GetUnsafeReadOnlyPtr();
+            var dest        = (PredictedPositions*)PredictedPositions.GetUnsafePtr();
+            var invMassPtr  = (InvMass*)InvMasses.GetUnsafeReadOnlyPtr();
+            var bendCnstPtr = (BendConstraint*)BendConstraints.GetUnsafeReadOnlyPtr();
             
-            // int index0 = pStart,
-            //     index1 = pStart + 1,
-            //     index2 = pStart + 2,
-            //     index3 = pStart + 3;
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
+#if UNITY_EDITOR
+            var debugPtr = (float3*)DebugArray.GetUnsafePtr();
+#endif
+            
+            for (int index = start; index < start + count; index++)
+            {
+                int  quadID  = updatePtr[index];
+                int  offset  = quadID * 4;
 
-            float3
-                point0 = PredictedPositions[indices.x].Value,
-                point1 = PredictedPositions[indices.y].Value,
-                point2 = PredictedPositions[indices.z].Value,
-                point3 = PredictedPositions[indices.w].Value;
+                BendConstraint cnstr = bendCnstPtr[quadID];
 
-            float
-                invMass0 = InvMasses[indices.x].Value,
-                invMass1 = InvMasses[indices.y].Value,
-                invMass2 = InvMasses[indices.z].Value,
-                invMass3 = InvMasses[indices.w].Value;
+                float3x4 positions;
+                UnsafeUtility.MemCpy(&positions, dest + offset, size);
 
-            float3 
-                crr0 = float3.zero,
-                crr1 = float3.zero,
-                crr2 = float3.zero,
-                crr3 = float3.zero;
+                float4 invMasses;
+                
+                UnsafeUtility.MemCpy(&invMasses, invMassPtr + offset, massSize);
+                
 
-            // if (solve_BendConstraint_matthias(
-            //         point1, invMass1,
-            //         point0, invMass0,
-            //         point2, invMass2,
-            //         point3, invMass3,
-            //         cnstr.restAngle,
-            //         BendStiffness,
-            //         ref crr1, ref crr0, ref crr2, ref crr3
-            if (solve_BendConstraint_rbridson(
-                    point0, invMass0,
-                    point3, invMass3,
-                    point2, invMass2,
-                    point1, invMass1,
+                float3
+                    crr0 = float3.zero,
+                    crr1 = float3.zero,
+                    crr2 = float3.zero,
+                    crr3 = float3.zero;
+
+                // if (solve_BendConstraint_matthias(
+                //         positions[1], invMasses[1],
+                //         positions[0], invMasses[0],
+                //         positions[2], invMasses[2],
+                //         positions[3], invMasses[3],
+                //         cnstr.restAngle,
+                //         BendStiffness,
+                //         ref crr1, ref crr0, ref crr2, ref crr3
+                if (solve_BendConstraint_rbridson(
+                    positions[0], invMasses[0],
+                    positions[3], invMasses[3],
+                    positions[2], invMasses[2],
+                    positions[1], invMasses[1],
                     cnstr.restAngle,
                     BendStiffness,
                     ref crr0, ref crr3, ref crr2, ref crr1
                 ))
-            {
-                point0 += crr0;
-                point1 += crr1;
-                point2 += crr2;
-                point3 += crr3;
+                {
+                    float3x4 crr = new float3x4(crr0, crr1, crr2, crr3);
+                    positions += crr;
 
-                PredictedPositions[indices.x] = new PredictedPositions() { Value = point0 };
-                PredictedPositions[indices.y] = new PredictedPositions() { Value = point1 };
-                PredictedPositions[indices.z] = new PredictedPositions() { Value = point2 };
-                PredictedPositions[indices.w] = new PredictedPositions() { Value = point3 };
-
+                    UnsafeUtility.MemCpy(dest + offset, &positions, size);
 #if UNITY_EDITOR
-                DebugArray[indices.x] = crr0;
-                DebugArray[indices.y] = crr1;
-                DebugArray[indices.z] = crr2;
-                DebugArray[indices.w] = crr3;
+                    
+                    UnsafeUtility.MemCpy(debugPtr + offset, &crr, size);
 #endif
+                }
             }
         }
 
@@ -1105,14 +1175,14 @@ namespace UnityEngine.PBD
             float stiffness,
             ref float3 crr0, ref float3 crr1, ref float3 crr2, ref float3 crr3)
         {
-            if (invMass0 < math.EPSILON && invMass1 < math.EPSILON)
-                return false;
+//            if (invMass0 < math.EPSILON && invMass1 < math.EPSILON)
+//                return false;
 
             float3 e = p3 - p2;
             float elen = math.length(e);
 
-            if (elen < math.EPSILON)
-                return false;
+//            if (elen < math.EPSILON)
+//                return false;
 
             float invElen = 1.0f / elen;
 
@@ -1141,8 +1211,9 @@ namespace UnityEngine.PBD
                 invMass2 * math.lengthsq(d2) +
                 invMass3 * math.lengthsq(d3);
 
-            if (lambda == 0)
-                return false;
+//            if (lambda == 0)
+//                return false;
+            lambda = math.max(lambda, math.EPSILON);
 
             lambda = (phi - restAngle) / lambda * stiffness;
 
@@ -1158,162 +1229,36 @@ namespace UnityEngine.PBD
     }
 
     #endregion
-
-    
     
     
     #region Particle2ParticleCollision
 
-    [BurstCompile]
-    public struct ClearParticleHashJob : IJob
-    {
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeList<ParticleHash> ParticleHashes;
-        
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeHashMap<int, HashRange> hashRanges;
-        
-        public void Execute()
-        {
-            ParticleHashes.Clear();
-            hashRanges.Clear();
-        }
-    }
-    
-    
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct CalculateHashesJob : IJobParallelFor
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<int>.ReadOnly UpdateList;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
-        
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<QuadPredictedPositions>.ReadOnly QuadPredictedPositions;
-
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeList<ParticleHash>.ParallelWriter ParticleHashes;
-        
-        [ReadOnly] public float4 filterParams;//pos radius
-
-        [ReadOnly] public float cellRadius;
-
-        [ReadOnly] public bool collisionByQuad;
-
-        public void Execute(int index)
-        {
-            int quad = UpdateList[index];
-
-            int numCells = UpdateList.Length;
-
-            if (collisionByQuad)
-                AddHashByQuad(quad, numCells);
-            else
-                AddHashByParticle(quad, numCells * 4);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void AddHashByQuad(int quad, int numCells)
-        {
-            float3 pos = QuadPredictedPositions[quad].Value;
-            
-            if (!MathematicsUtil.InSphereSpacial(in pos, cellRadius, in filterParams))
-                return;
-            
-            AddToHashList(quad, pos, numCells);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void AddHashByParticle(int quad, int numCells)
-        {
-            int start = quad * 4;
-            for (int i = start; i < start + 4; i++)
-            {
-                float3 pos = PredictedPositions[i].Value;
-                
-                if (!MathematicsUtil.InSphereSpacial(in pos, cellRadius * 0.5f, in filterParams))
-                    continue;
-
-                AddToHashList(i, pos, numCells);
-            }
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void AddToHashList(int index, float3 pos, int numCells)
-        {
-            int3 cellPos = HashUtility.PosToGrid(pos, cellRadius);
-            int hash = HashUtility.GridToHash(cellPos, numCells);
-            ParticleHashes.AddNoResize(new ParticleHash()
-            {
-                Index = index,
-                Hash = hash,
-            });
-        }
-    }
-
-    [BurstCompile]
-    public struct CaculateParticleHashRangesJob : IJob
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<ParticleHash>.ReadOnly SortedHashes;
-
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeHashMap<int, HashRange>.ParallelWriter hashRanges;
-
-        public void Execute()
-        {
-            if (SortedHashes.Length < 1)
-                return;
-
-            int currentHash = SortedHashes[0].Hash;
-            int start = 0;
-            for (int i = 1; i < SortedHashes.Length; i++)
-            {
-                int nextHash = SortedHashes[i].Hash;
-                if (nextHash != currentHash)
-                {
-                    hashRanges.TryAdd(currentHash, new HashRange()
-                    {
-                        Start = start,
-                        End = i - 1,
-                    });
-
-                    currentHash = nextHash;
-                    start = i;
-                }
-            }
-
-            hashRanges.TryAdd(currentHash, new HashRange()
-            {
-                Start = start,
-                End = SortedHashes.Length - 1,
-            });
-        }
-    }
-
     /// <summary>
     /// 粒子-粒子
     /// </summary>
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct SPHOptimizedCollisionDetectionJob : IJobParallelFor
+
+    
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
+                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
+                  /*Debug = true,*/
+                  DisableSafetyChecks = true)]
+    public unsafe struct SPHOptimizedCollisionDetectionReverseSearchJob : IJobParallelFor
     {
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<int>.ReadOnly UpdateList;
-
+        
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
-        
+
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<Velocity>.ReadOnly Velocities;
 
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<InvMass>.ReadOnly InvMasses;
-        
+
         [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<QuadPredictedPositions>.ReadOnly QuadPredictedPositions;
-        
+        public NativeArray<QuadPredictedPositions> QuadPredictedPositions;
+
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<QuadVelocity>.ReadOnly QuadVelocities;
 
@@ -1324,50 +1269,323 @@ namespace UnityEngine.PBD
         public NativeArray<ParticleCollisionConstraint> ParticleCollisionConstraints;
 
         [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<ParticleHash>.ReadOnly SortedHashes;
+        public NativeArray<BaseHash> SortedHashes;
 
         [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeHashMap<int, HashRange> hashRanges;
+        public NativeArray<int> Hashes;
         
-        [ReadOnly, NativeDisableParallelForRestriction]
+//        [ReadOnly, NativeDisableParallelForRestriction]
+//        public UnsafeParallelHashMap<PrecomputedHashKey, HashRange>.ReadOnly HashRanges;
+
+        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        public SimpleHashArray<HashRange> HashRanges;
+
+        [ReadOnly, NativeDisableParallelForRestriction, NativeFixedLength(27)]
         public NativeArray<int3>.ReadOnly neighborOffsets;
-        
-        [ReadOnly] public float4 filterParams;//pos radius
-        
+
+        [ReadOnly] public float4 filterParams; //pos radius
+
         [ReadOnly] public float radius;
 
         [ReadOnly] public float cellRadius;
 
         [ReadOnly] public float CollisionStiffness;
 
+        [ReadOnly] public int JobNum;
+
+        [ReadOnly] public int bucketCapacityMask;
+
         [ReadOnly] public bool collisionByQuad;
 
         public void Execute(int index)
         {
-            index = UpdateList[index];
-            int numCells = UpdateList.Length;
+            int length = Hashes.Length;
+
+            if (length < 1 || JobNum < 1)
+                return;
+
+            int actualJobNum  = math.min(JobNum, length);
+            int segmentLength = (length + actualJobNum - 1) / actualJobNum;
+
+            float radiusSum   = radius + radius;
+            float radiusSumSq = radiusSum * radiusSum;
+
+            int start = segmentLength * index,
+                end   = math.min(math.mad(segmentLength, index, segmentLength), length);
 
             if (collisionByQuad)
-                CollisionIntersectionByQuad(index, numCells);
+                CollisionIntersectionByQuad(start, end, radiusSum, radiusSumSq);
             else
-                CollisionIntersectionByParticles(index, numCells * 4);
+                CollisionIntersectionByParticles(start, end, radiusSum, radiusSumSq);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void CollisionIntersectionByQuad(int index, int numCells)
+        void CollisionIntersectionByQuad(int start, int end, float radiusSum, float radiusSumSq)
+        {
+            var keyPtr       = (int*)Hashes.GetUnsafeReadOnlyPtr();
+            var hashIndexPtr = (BaseHash*)SortedHashes.GetUnsafeReadOnlyPtr();
+            var posPtr       = (QuadPredictedPositions*)QuadPredictedPositions.GetUnsafeReadOnlyPtr();
+            var massPtr      = (QuadInvMass*)QuadInvMasses.GetUnsafeReadOnlyPtr();
+            var neighberPtr  = (int3*)neighborOffsets.GetUnsafeReadOnlyPtr();
+            var cnstrPtr     = (ParticleCollisionConstraint*)ParticleCollisionConstraints.GetUnsafePtr();
+            var size         = UnsafeUtility.SizeOf<ParticleCollisionConstraint>();
+            
+            int neighberLength = neighborOffsets.Length;
+            int hashMask       = MathematicsUtil.NextPowerOfTwo(UpdateList.Length)- 1;
+
+            for (int i = start; i < end; i++)
+            {
+                var hash  = keyPtr[i];
+                HashRanges.TryGetValue(hash, out HashRange range);
+                for (int A = range.Start; A <= range.End; A++)
+                {
+                    int indexA = hashIndexPtr[A].Index;
+
+                    float3 posA = posPtr[indexA].Value;
+
+                    if (!MathematicsUtil.InSphereSpacial(in posA, cellRadius, in filterParams))
+                        continue;
+
+                    float invMassA = massPtr[indexA].Value;
+                    float3 /*velocity = QuadVelocities[indexA].Value,*/
+                        delta = float3.zero;
+
+                    int cnstrsCount = 0;
+
+                    int3 cellPos = HashUtility.PosToGrid(posA, cellRadius);
+
+                    for (int offset = 0; offset < neighberLength; offset++)
+                    {
+                        int3 offsetStep = neighberPtr[offset];
+
+//                            if (math.dot(offsetStep, velocity) < 0)
+//                                continue;
+
+                        int3 offsetPos = cellPos + offsetStep;
+                        int  nextHash  = HashUtility.GridToHash(offsetPos, hashMask);
+
+                        if (HashRanges.TryGetValue(nextHash, out var hashRange))
+                        {
+                            for (int B = hashRange.Start; B <= hashRange.End; B++)
+                            {
+                                int indexB = hashIndexPtr[B].Index;
+
+                                if (indexB == indexA)
+                                    continue;
+
+                                float3 posB = posPtr[indexB].Value;
+
+                                float3 dir = posA - posB;
+
+                                float disSq = math.lengthsq(dir);
+
+                                if (disSq > radiusSumSq || disSq <= math.EPSILON)
+                                    continue;
+
+
+                                float dis = math.sqrt(disSq);
+
+                                float invMassB = massPtr[indexB].Value;
+                                float invMass  = invMassA + invMassB;
+
+                                float3 dP = CollisionStiffness * (dis - radiusSum) * (dir / dis) / invMass;
+
+                                delta -= dP * invMassA;
+                                cnstrsCount++;
+                            }
+                        }
+                    }
+
+                    if (cnstrsCount > 0)
+                    {
+                        var deltaPosition = new ParticleCollisionConstraint()
+                        {
+                            Delta            = delta,
+                            ConstraintsCount = cnstrsCount,
+                        };
+                        UnsafeUtility.MemCpyReplicate(cnstrPtr + indexA * 4, &deltaPosition, size, 4);
+                    }
+                }
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        void CollisionIntersectionByParticles(int start, int end, float radiusSum, float radiusSumSq)
+        {
+            var keyPtr       = (int*)Hashes.GetUnsafeReadOnlyPtr();
+            var hashIndexPtr = (BaseHash*)SortedHashes.GetUnsafeReadOnlyPtr();
+            var posPtr       = (PredictedPositions*)PredictedPositions.GetUnsafeReadOnlyPtr();
+            var massPtr      = (InvMass*)InvMasses.GetUnsafeReadOnlyPtr();
+            var neighberPtr  = (int3*)neighborOffsets.GetUnsafeReadOnlyPtr();
+            var cnstrPtr     = (ParticleCollisionConstraint*)ParticleCollisionConstraints.GetUnsafePtr();
+            
+            int neighberLength = neighborOffsets.Length;
+            int hashMask       = (MathematicsUtil.NextPowerOfTwo(UpdateList.Length) << 2) - 1;
+            
+            for (int i = start; i < end; i++)
+            {
+                var hash  = keyPtr[i];
+                HashRanges.TryGetValue(hash, out HashRange range);
+                for (int A = range.Start; A <= range.End; A++)
+                {
+                    int indexA = hashIndexPtr[A].Index;
+
+                    float3 posA = posPtr[indexA].Value;
+
+                    if (!MathematicsUtil.InSphereSpacial(in posA, cellRadius, in filterParams))
+                        continue;
+
+                    float invMassA = massPtr[indexA].Value;
+                    int3  cellPos  = HashUtility.PosToGrid(posA, cellRadius);
+                    float3 /*velocity = Velocities[indexA].Value,*/
+                        delta = float3.zero;
+
+                    int cnstrsCount = 0;
+                    for (int offset = 0; offset < neighberLength; offset++)
+                    {
+                        int3 offsetStep = neighberPtr[offset];
+
+//                            if (math.dot(offsetStep, velocity) < 0)
+//                                continue;
+
+                        int3 offsetPos = cellPos + offsetStep;
+                        int  nextHash  = HashUtility.GridToHash(offsetPos, hashMask);
+
+                        if (HashRanges.TryGetValue(nextHash, out var hashRange))
+                        {
+                            for (int B = hashRange.Start; B <= hashRange.End; B++)
+                            {
+                                int indexB = hashIndexPtr[B].Index;
+
+                                if (indexB == indexA || (indexB / 4) == (indexA / 4))
+                                    continue;
+
+                                float3 posB = posPtr[indexB].Value;
+
+                                float3 dir = posA - posB;
+
+                                float disSq = math.lengthsq(dir);
+
+                                if (disSq > radiusSumSq || disSq <= math.EPSILON)
+                                    continue;
+
+
+                                float dis = math.sqrt(disSq);
+
+                                float invMassB = massPtr[indexB].Value;
+                                float invMass  = invMassA + invMassB;
+
+                                float3 dP = CollisionStiffness * (dis - radiusSum) * (dir / dis) / invMass;
+
+                                delta -= dP * invMassA;
+                                cnstrsCount++;
+                            }
+                        }
+                    }
+
+                    if (cnstrsCount > 0)
+                    {
+                        cnstrPtr[indexA] = new ParticleCollisionConstraint()
+                        {
+                            Delta = delta,
+                            ConstraintsCount = cnstrsCount,
+                        };
+                    }
+                }
+            }
+        }
+    }
+    
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
+                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
+                  /*Debug = true,*/
+                  DisableSafetyChecks = true)]
+    public struct SPHOptimizedCollisionDetectionJob : IJobParallelForBatch
+    {
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
+        public NativeArray<int>.ReadOnly UpdateList;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<Velocity>.ReadOnly Velocities;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<InvMass>.ReadOnly InvMasses;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<QuadPredictedPositions> QuadPredictedPositions;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<QuadVelocity>.ReadOnly QuadVelocities;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<QuadInvMass>.ReadOnly QuadInvMasses;
+
+        [WriteOnly, NativeDisableParallelForRestriction]
+        public NativeArray<ParticleCollisionConstraint> ParticleCollisionConstraints;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<BaseHash> SortedHashes;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public UnsafeParallelHashMap<PrecomputedHashKey, HashRange>.ReadOnly hashRanges;
+
+        [ReadOnly, NativeDisableParallelForRestriction, NativeFixedLength(27)]
+        public NativeArray<int3>.ReadOnly neighborOffsets;
+
+        [ReadOnly] public float4 filterParams; //pos radius
+
+        [ReadOnly] public float radius;
+
+        [ReadOnly] public float cellRadius;
+
+        [ReadOnly] public float CollisionStiffness;
+
+        [ReadOnly] public int bucketCapacityMask;
+
+        [ReadOnly] public bool collisionByQuad;
+
+        public void Execute(int start, int count)
+        {
+            float radiusSum   = radius + radius;
+            float radiusSumSq = radiusSum * radiusSum;
+
+            if (collisionByQuad)
+            {
+                int hashMask = MathematicsUtil.NextPowerOfTwo(UpdateList.Length) - 1;
+                for (int index = start; index < start + count; index++)
+                {
+                    int quadID = UpdateList[index];
+
+                    CollisionIntersectionByQuad(quadID, radiusSum, radiusSumSq, hashMask);
+                }
+            }
+            else
+            {
+                int hashMask = (MathematicsUtil.NextPowerOfTwo(UpdateList.Length) << 2) - 1;
+                for (int index = start; index < start + count; index++)
+                {
+                    int quadID = UpdateList[index];
+
+                    CollisionIntersectionByParticles(quadID, radiusSum, radiusSumSq, hashMask);
+                }
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        void CollisionIntersectionByQuad(int index, float radiusSum, float radiusSumSq, int hashMask)
         {
             float3
-                posA = QuadPredictedPositions[index].Value,
+                posA     = QuadPredictedPositions[index].Value,
                 velocity = QuadVelocities[index].Value,
-                delta = float3.zero;
-            
+                delta    = float3.zero;
+
             if (!MathematicsUtil.InSphereSpacial(in posA, cellRadius, in filterParams))
                 return;
-            
-            float radiusSum = radius + radius;
-            
-            float 
-                radiusSumSq = radiusSum * radiusSum,
+
+            float
                 invMassA = QuadInvMasses[index].Value;
 
             int cnstrsCount = 0;
@@ -1380,7 +1598,7 @@ namespace UnityEngine.PBD
                 if (math.dot(offsetStep, velocity) < 0)
                     continue;
                 int3 offsetPos = cellPos + offsetStep;
-                int nextHash = HashUtility.GridToHash(offsetPos, numCells);
+                int  nextHash  = HashUtility.GridToHash(offsetPos, hashMask);
 
                 if (hashRanges.TryGetValue(nextHash, out var hashRange))
                 {
@@ -1388,11 +1606,11 @@ namespace UnityEngine.PBD
                     {
                         int indexB = SortedHashes[i].Index;
 
-                        if (indexB <= index)
+                        if (indexB == index)
                             continue;
-                        
-                        float3 posB = QuadPredictedPositions[indexB].Value;
-                        float invMassB = QuadInvMasses[indexB].Value;
+
+                        float3 posB     = QuadPredictedPositions[indexB].Value;
+                        float  invMassB = QuadInvMasses[indexB].Value;
 
                         float3 dir = posA - posB;
 
@@ -1402,7 +1620,7 @@ namespace UnityEngine.PBD
                             continue;
 
 
-                        float dis = math.sqrt(disSq);
+                        float dis     = math.sqrt(disSq);
                         float invMass = invMassA + invMassB;
 
                         float3 dP = CollisionStiffness * (dis - radiusSum) * (dir / dis) / invMass;
@@ -1417,7 +1635,7 @@ namespace UnityEngine.PBD
             {
                 var deltaPosition = new ParticleCollisionConstraint()
                 {
-                    Delta = delta,
+                    Delta            = delta,
                     ConstraintsCount = cnstrsCount,
                 };
 
@@ -1430,23 +1648,20 @@ namespace UnityEngine.PBD
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void CollisionIntersectionByParticles(int index, int numCells)
+        void CollisionIntersectionByParticles(int index, float radiusSum, float radiusSumSq, int hashMask)
         {
-            float radiusSum = radius + radius;
-            float radiusSumSq = radiusSum * radiusSum;
-
             int start = index * 4;
 
             for (int indexA = start; indexA < start + 4; indexA++)
             {
                 float3
-                    posA = PredictedPositions[indexA].Value,
-                    velocity = Velocities[indexA].Value,
-                    delta = float3.zero;
-                
-                if (!MathematicsUtil.InSphereSpacial(in posA, cellRadius * 0.5f, in filterParams))
+                    posA     = PredictedPositions[indexA].Value,
+//                    velocity = Velocities[indexA].Value,
+                    delta    = float3.zero;
+
+                if (!MathematicsUtil.InSphereSpacial(in posA, cellRadius, in filterParams))
                     continue;
-                
+
                 float invMassA = InvMasses[indexA].Value;
 
                 int3 cellPos = HashUtility.PosToGrid(posA, cellRadius);
@@ -1456,10 +1671,10 @@ namespace UnityEngine.PBD
                 for (int offset = 0; offset < neighborOffsets.Length; offset++)
                 {
                     int3 offsetStep = neighborOffsets[offset];
-                    if (math.dot(offsetStep, velocity) < 0)
-                        continue;
+//                    if (math.dot(offsetStep, velocity) < 0)
+//                        continue;
                     int3 offsetPos = cellPos + offsetStep;
-                    int nextHash = HashUtility.GridToHash(offsetPos, numCells);
+                    int  nextHash  = HashUtility.GridToHash(offsetPos, hashMask);
 
                     if (hashRanges.TryGetValue(nextHash, out var hashRange))
                     {
@@ -1467,7 +1682,7 @@ namespace UnityEngine.PBD
                         {
                             int indexB = SortedHashes[i].Index;
 
-                            if (indexB <= index)
+                            if (indexB == indexA || (indexB / 4) == index)
                                 continue;
 
                             float3 posB = PredictedPositions[indexB].Value;
@@ -1483,7 +1698,7 @@ namespace UnityEngine.PBD
                             float dis = math.sqrt(disSq);
 
                             float invMassB = InvMasses[indexB].Value;
-                            float invMass = invMassA + invMassB;
+                            float invMass  = invMassA + invMassB;
 
                             float3 dP = CollisionStiffness * (dis - radiusSum) * (dir / dis) / invMass;
 
@@ -1491,6 +1706,7 @@ namespace UnityEngine.PBD
                             cnstrsCount++;
                         }
                     }
+
                 }
 
                 if (cnstrsCount > 0)
@@ -1506,91 +1722,13 @@ namespace UnityEngine.PBD
         }
     }
 
-    [BurstCompile]
-    public struct ClearHashNeighbours : IJob
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
+                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
+                  /*Debug = true,*/
+                  DisableSafetyChecks = true)]
+    public struct InterParticlesCollisions : IJobParallelForBatch
     {
-        [WriteOnly] public NativeMultiHashMap<int, int> hashMap;
-        public void Execute()
-        {
-            hashMap.Clear();
-        }
-    }
-
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct BuildHashNeighbours : IJobParallelFor
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<int>.ReadOnly UpdateList;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
-        
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<QuadPredictedPositions>.ReadOnly QuadPredictedPositions;
-
-        [WriteOnly] public NativeMultiHashMap<int, int>.ParallelWriter hashMap;
-        
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<int3>.ReadOnly neighborOffsets;
-        
-        [ReadOnly] public float4 filterParams;//pos radius
-        
-        [ReadOnly] public float cellRadius;
-
-        [ReadOnly] public bool collisionByQuad;
-
-        public void Execute(int index)
-        {
-            index = UpdateList[index];
-            int numCells = UpdateList.Length;
-            if (collisionByQuad)
-                AddNeighboursByQuad(index, numCells);
-            else
-                AddNeighboursByParticles(index, numCells * 4);
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void AddNeighboursByQuad(int index, int numCells)
-        {
-            float3 position = QuadPredictedPositions[index].Value;
-            if (MathematicsUtil.InSphereSpacial(in position, cellRadius, in filterParams))
-            {
-                CreatNeighbours(index, position, numCells);
-            }
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void AddNeighboursByParticles(int index, int numCells)
-        {
-            int start = index * 4;
-            for (int i = start; i < start + 4; i++)
-            {
-                var position = PredictedPositions[i].Value;
-                if (MathematicsUtil.InSphereSpacial(in position, cellRadius * 0.5f, in filterParams))
-                {
-                    CreatNeighbours(i, position, numCells);
-                }
-            }
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void CreatNeighbours(int index, float3 pos, int numCells)
-        {
-            int3 cellPos = HashUtility.PosToGrid(pos, cellRadius);
-        
-            for (int offset = 0; offset < neighborOffsets.Length; offset++)
-            {
-                int3 offsetPos = cellPos + neighborOffsets[offset];
-                int hash = HashUtility.GridToHash(offsetPos, numCells);
-                hashMap.Add(hash, index);
-            }
-        }
-    }
-
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct InterParticlesCollisions : IJobParallelFor
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
         public NativeArray<int>.ReadOnly UpdateList;
 
         [ReadOnly, NativeDisableParallelForRestriction]
@@ -1600,7 +1738,7 @@ namespace UnityEngine.PBD
         public NativeArray<InvMass>.ReadOnly InvMasses;
         
         [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<QuadPredictedPositions>.ReadOnly QuadPredictedPositions;
+        public NativeArray<QuadPredictedPositions> QuadPredictedPositions;
 
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<QuadInvMass>.ReadOnly QuadInvMasses;
@@ -1608,9 +1746,9 @@ namespace UnityEngine.PBD
         [WriteOnly, NativeDisableParallelForRestriction]
         public NativeArray<ParticleCollisionConstraint> ParticleCollisionConstraints;
 
-        [ReadOnly] public NativeMultiHashMap<int, int> hashMap;
-        
-        [ReadOnly] public float4 filterParams;//pos radius
+        [ReadOnly] public NativeParallelMultiHashMap<int, int>.ReadOnly hashMap;
+
+        [ReadOnly] public float4 filterParams; //pos radius
 
         [ReadOnly] public float radius;
 
@@ -1620,35 +1758,49 @@ namespace UnityEngine.PBD
 
         [ReadOnly] public bool collisionByQuad;
 
-        public void Execute(int index)
+        [ReadOnly] public int bucketCapacityMask;
+
+        public void Execute(int start, int count)
         {
-            index = UpdateList[index];
-            int numCells = UpdateList.Length;
+            float radiusSum   = radius + radius;
+            float radiusSumSq = radiusSum * radiusSum;
             if (collisionByQuad)
-                CollisionIntersectionByQuad(index, numCells);
+            {
+                for (int index = start; index < start + count; index++)
+                {
+                    int quadID = UpdateList[index];
+
+                    CollisionIntersectionByQuad(quadID, radiusSum, radiusSumSq);
+                }
+            }
             else
-                CollisionIntersectionByParticles(index, numCells * 4);
+            {
+                for (int index = start; index < start + count; index++)
+                {
+                    int quadID = UpdateList[index];
+
+                    CollisionIntersectionByParticles(quadID, radiusSum, radiusSumSq);
+                }
+            }
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void CollisionIntersectionByQuad(int index, int numCells)
+        void CollisionIntersectionByQuad(int index, float radiusSum, float radiusSumSq)
         {
             float3 posA = QuadPredictedPositions[index].Value;
-            
+
             if (!MathematicsUtil.InSphereSpacial(in posA, cellRadius, in filterParams))
                 return;
-            
-            float radiusSum = radius + radius;
-            float radiusSumSq = radiusSum * radiusSum,
-                invMassA = QuadInvMasses[index].Value;
+
+            float invMassA = QuadInvMasses[index].Value;
 
             int3 cellPos = HashUtility.PosToGrid(posA, cellRadius);
-            int hash = HashUtility.GridToHash(cellPos, numCells);
+            int  hash    = HashUtility.GridToHash(cellPos, bucketCapacityMask);
 
             bool found = hashMap.TryGetFirstValue(hash, out int indexB, out var iterator);
 
-            float3 delta = float3.zero;
-            int cnstrsCount = 0;
+            float3 delta       = float3.zero;
+            int    cnstrsCount = 0;
 
             while (found)
             {
@@ -1658,8 +1810,8 @@ namespace UnityEngine.PBD
                     continue;
                 }
 
-                float3 posB = QuadPredictedPositions[indexB].Value;
-                float invMassB = QuadInvMasses[indexB].Value;
+                float3 posB     = QuadPredictedPositions[indexB].Value;
+                float  invMassB = QuadInvMasses[indexB].Value;
 
                 float3 dir = posA - posB;
 
@@ -1687,7 +1839,7 @@ namespace UnityEngine.PBD
             {
                 var deltaPosition = new ParticleCollisionConstraint()
                 {
-                    Delta = delta,
+                    Delta            = delta,
                     ConstraintsCount = cnstrsCount,
                 };
 
@@ -1700,32 +1852,29 @@ namespace UnityEngine.PBD
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        void CollisionIntersectionByParticles(int index, int numCells)
+        void CollisionIntersectionByParticles(int index, float radiusSum, float radiusSumSq)
         {
-            float radiusSum = radius + radius;
-            float radiusSumSq = radiusSum * radiusSum;
-
             int start = index * 4;
 
             for (int indexA = start; indexA < start + 4; indexA++)
             {
                 float3 posA = PredictedPositions[indexA].Value;
-                
-                if (!MathematicsUtil.InSphereSpacial(in posA, cellRadius * 0.5f, in filterParams))
+
+                if (!MathematicsUtil.InSphereSpacial(in posA, cellRadius, in filterParams))
                     continue;
-                
+
                 float invMassA = InvMasses[indexA].Value;
 
                 int3 cellPos = HashUtility.PosToGrid(posA, cellRadius);
-                int hash = HashUtility.GridToHash(cellPos, numCells);
+                int  hash    = HashUtility.GridToHash(cellPos, bucketCapacityMask);
 
                 bool found = hashMap.TryGetFirstValue(hash, out int indexB, out var iterator);
 
-                float3 delta = float3.zero;
-                int cnstrsCount = 0;
+                float3 delta       = float3.zero;
+                int    cnstrsCount = 0;
                 while (found)
                 {
-                    if (indexA == indexB || indexB / 4 == index)
+                    if (indexB == indexA || (indexB / 4) == index)
                     {
                         found = hashMap.TryGetNextValue(out indexB, ref iterator);
                         continue;
@@ -1746,7 +1895,7 @@ namespace UnityEngine.PBD
                     float dis = math.sqrt(disSq);
 
                     float invMassB = InvMasses[indexB].Value;
-                    float invMass = invMassA + invMassB;
+                    float invMass  = invMassA + invMassB;
 
                     float3 dP = CollisionStiffness * (dis - radiusSum) * (dir / dis) / invMass;
 
@@ -1768,127 +1917,103 @@ namespace UnityEngine.PBD
             }
         }
     }
-    
+
     [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct ReCaculateQuadVelocityJob : IJobParallelFor
+    public struct ReCaculateQuadVelocityJob : IJobParallelForBatch
     {
-        [ReadOnly, NativeDisableParallelForRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
         public NativeArray<int>.ReadOnly UpdateList;
-        
+
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<Velocity>.ReadOnly Velocities;
-        
+
         [WriteOnly, NativeDisableParallelForRestriction]
         public NativeArray<QuadVelocity> QuadVelocities;
         
-        public void Execute(int index)
+        [ReadOnly]
+        private static readonly float4 weightMatrix = new float4(
+            0.25f, 0.25f, 0.25f, 0.25f
+        );
+
+        public unsafe void Execute(int start, int count)
         {
-            index = UpdateList[index];
-            int start = index * 4;
+            var size = UnsafeUtility.SizeOf<Velocity>() * 4;
             
-            float3 velocity = float3.zero;
-            for (int i = start; i < start + 4; i++)
-                velocity += Velocities[i].Value;
-            velocity *= 0.25f;
-
-            QuadVelocities[index] = new QuadVelocity() { Value = velocity };
-        }
-    }
-
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct AddParticleCollisionConstraintToPosition : IJobParallelFor
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<int>.ReadOnly UpdateList;
-
-        [NativeDisableParallelForRestriction] 
-        public NativeArray<PredictedPositions> PredictedPositions;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<ParticleCollisionConstraint>.ReadOnly ParticleCollisionConstraints;
-
-        public void Execute(int index)
-        {
-            index = UpdateList[index];
-            int start = index * 4;
-            for (int i = start; i < start + 4; i++)
+            var updatePtr = (int*)UpdateList.GetUnsafeReadOnlyPtr();
+            var source = (Velocity*)Velocities.GetUnsafeReadOnlyPtr();
+            var dest   = (QuadVelocity*)QuadVelocities.GetUnsafePtr();
+            
+            for (int index = start; index < start + count; index++)
             {
-                var position = PredictedPositions[i].Value;
-                var delta = ParticleCollisionConstraints[i];
-                int cnstrsCount = delta.ConstraintsCount;
-                if (cnstrsCount > 0)
-                {
-                    position += delta.Delta;
-                    PredictedPositions[i] = new PredictedPositions() { Value = position };
-                }
+                int quadID = updatePtr[index];
+                
+                float3x4 velocites;
+                
+                UnsafeUtility.MemCpy(&velocites, source + quadID * 4, size);
+
+//                float3 velocity = (velocites.c0 + velocites.c1 + velocites.c2 + velocites.c3) * 0.25f;
+
+                float3 velocity = math.mul(velocites, weightMatrix);
+                
+                dest[quadID] = new QuadVelocity() { Value = velocity };
             }
         }
     }
 
     [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct ClearParticleCollisionConstraint : IJobParallelFor
+    public struct AddParticleCollisionConstraintToPosition : IJobParallelForBatch
     {
-        [ReadOnly, NativeDisableParallelForRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
         public NativeArray<int>.ReadOnly UpdateList;
 
-        [WriteOnly, NativeDisableParallelForRestriction]
+        [NativeDisableParallelForRestriction] public NativeArray<PredictedPositions> PredictedPositions;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<ParticleCollisionConstraint> ParticleCollisionConstraints;
 
-        public void Execute(int index)
+        public unsafe void Execute(int start, int count)
         {
-            index = UpdateList[index];
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
-            var partocleCnstr = new ParticleCollisionConstraint()
+            var size     = UnsafeUtility.SizeOf<float3x4>();
+            var stride   = UnsafeUtility.SizeOf<float3>();
+            var cnstSize = UnsafeUtility.SizeOf<ParticleCollisionConstraint>();
+
+            var updatePtr = (int*)UpdateList.GetUnsafeReadOnlyPtr();
+            var source    = (ParticleCollisionConstraint*)ParticleCollisionConstraints.GetUnsafeReadOnlyPtr();
+            var dest      = (PredictedPositions*)PredictedPositions.GetUnsafePtr();
+            
+            for (int index = start; index < start + count; index++)
             {
-                Delta = float3.zero, 
-                ConstraintsCount = 0
-            };
-            ParticleCollisionConstraints[indices[0]] = partocleCnstr;
-            ParticleCollisionConstraints[indices[1]] = partocleCnstr;
-            ParticleCollisionConstraints[indices[2]] = partocleCnstr;
-            ParticleCollisionConstraints[indices[3]] = partocleCnstr;
+                int offset = updatePtr[index] * 4;
+                
+                float3x4 positions, delta;
+
+                //读4个pos
+                UnsafeUtility.MemCpy(&positions, dest + offset, size);
+
+                //读4个Constraints.Delta
+                UnsafeUtility.MemCpyStride(&delta, stride, source + offset, cnstSize , stride, 4);
+
+                //计算,以每帧清空Constraint为前提
+                float3x4 predictedPositions = positions + delta;
+                
+                //回写
+                UnsafeUtility.MemCpy(dest + offset, &predictedPositions, size);
+            }
         }
     }
 
-    #endregion
+#endregion
     
     
     
 
     #region RigiBodyCollision
     
-    [BurstCompile]
-    public struct ClearRigiCollisionConstraint : IJobParallelFor
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<int>.ReadOnly UpdateList;
-
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<RigiCollisionConstraint> RigiCollisionConstraints;
-
-        public void Execute(int index)
-        {
-            index = UpdateList[index];
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
-            var rigiCnstr = new RigiCollisionConstraint()
-            {
-                Delta = float3.zero,
-                Velocity = float3.zero,
-                Normal = float3.zero,
-                ConstraintsCount = 0
-            };
-            RigiCollisionConstraints[indices[0]] = rigiCnstr;
-            RigiCollisionConstraints[indices[1]] = rigiCnstr;
-            RigiCollisionConstraints[indices[2]] = rigiCnstr;
-            RigiCollisionConstraints[indices[3]] = rigiCnstr;
-        }
-    }
-    
 
     [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct AddRigiCollisionConstraintToPositionByDivi : IJobParallelFor
+    public struct AddRigiCollisionConstraintToPositionByDivi : IJobParallelForBatch
     {
-        [ReadOnly, NativeDisableParallelForRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
         public NativeArray<int>.ReadOnly UpdateList;
 
         // [ReadOnly, NativeDisableParallelForRestriction]
@@ -1901,47 +2026,57 @@ namespace UnityEngine.PBD
         public NativeArray<Velocity> Velocities;
 
         [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<RigiCollisionConstraint>.ReadOnly RigiCollisionConstraints;
+        public NativeArray<RigiCollisionConstraint> RigiCollisionConstraints;
 
         [WriteOnly, NativeDisableParallelForRestriction]
         public NativeArray<IsNeedUpdate> IsNeedUpdates;
 
         [ReadOnly] public float Threshold;
-
-        public void Execute(int index)
+        
+        public void Execute(int start, int count)
         {
-            index = UpdateList[index];
-            int start = index * 4;
-            float thresholdSQ = Threshold;
-            bool4 beUpdates = true;
-            bool hasCollision = false;
-            
-            for (int i = 0; i <  4; i++)
+            float thresholdSQ  = Threshold;
+            for (int index = start; index < start + count; index++)
             {
-                int pIndex = i + start;
-                var rigiCnst = RigiCollisionConstraints[pIndex];
-                int cnstrsCount = rigiCnst.ConstraintsCount;
-                if (cnstrsCount > 0)
+                bool4 beUpdates    = true;
+                bool  hasCollision = false;
+
+                int  quadID  = UpdateList[index];
+                
+                int4 indices = math.mad(quadID, 4, new int4(0, 1, 2, 3));
+                for (int i = 0; i < 4; i++)
                 {
-                    var position = PredictedPositions[pIndex].Value;
+                    int pIndex      = indices[i];
+                    var rigiCnst    = RigiCollisionConstraints[pIndex];
+                    int cnstrsCount = rigiCnst.ConstraintsCount;
+                    if (cnstrsCount > 0)
+                    {
+                        var position = PredictedPositions[pIndex].Value;
 
-                    var delta = rigiCnst.Delta;
-                    var velocity = rigiCnst.Velocity;
+                        var delta    = rigiCnst.Delta;
+                        var velocity = rigiCnst.Velocity;
 
-                    Velocities[pIndex] = new Velocity() { Value = velocity };
-                    PredictedPositions[pIndex] = new PredictedPositions() { Value = position + delta / rigiCnst.ConstraintsCount };
-                    
-                    if ((math.lengthsq(velocity) < thresholdSQ))
-                        beUpdates[i] = false;
+                        Velocities[pIndex] = new Velocity()
+                        {
+                            Value = velocity
+                        };
+                        PredictedPositions[pIndex] = new PredictedPositions()
+                        {
+                            Value = position + delta / rigiCnst.ConstraintsCount
+                        };
 
-                    hasCollision = true;
+                        if ((math.lengthsq(velocity) < thresholdSQ))
+                            beUpdates[i] = false;
+
+                        hasCollision = true;
+                    }
                 }
-            }
 
-            if (hasCollision)
-            {
-                int countbits = math.countbits((uint)MathematicsUtil.bitmask(beUpdates));
-                IsNeedUpdates[index] = new IsNeedUpdate() { Value = countbits > 1 };
+                if (hasCollision)
+                {
+                    int countbits = math.countbits((uint)MathematicsUtil.bitmask(beUpdates));
+                    IsNeedUpdates[quadID] = new IsNeedUpdate() { Value = countbits > 1 };
+                }
             }
         }
     }
@@ -1950,84 +2085,95 @@ namespace UnityEngine.PBD
     public struct ReadRigibodyColliderTransformJob : IJobParallelForTransform
     {
         [NativeDisableParallelForRestriction] 
-        public NativeArray<PBDCustomColliderInfo> collider;
+        public NativeList<PBDCustomColliderInfo> collider;
+
+        [ReadOnly] public float DeltaTimeInv;
 
         public void Execute(int index, TransformAccess transform)
         {
             if (transform.isValid)
             {
-                PBDCustomColliderInfo data = collider[index];
+                ref var data = ref collider.ElementAt(index);
                 if (data.bStatic)
                     return;
                 data.Position = transform.position;
                 data.Rotation = transform.rotation;
                 data.Scale = MathematicsUtil.GetLossyScale(transform);
-                data.Prepare();
-                collider[index] = data;
+                data.Prepare(DeltaTimeInv);
             }
         }
     }
 
+    //to 并行
     [BurstCompile]
-    public struct UpdateSenceBounds : IJob
+    public struct RigibodySpatiaHashingJob : IJob
     {
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<PBDCustomColliderInfo>.ReadOnly Colliders;
+        
+        [WriteOnly] public NativeList<BaseHash> RigidBodyHashes;
 
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PBDBounds> SceneBounds;
+#if UNITY_EDITOR
+        [WriteOnly] public NativeList<float3> VoxelDebug;
+
+        [ReadOnly] public bool Debug;
+#endif
+
+        [ReadOnly] public float cellRadius; //不同于粒子格子尺寸
+        [ReadOnly] public int   bucketCapacityMask;
 
         public void Execute()
         {
-            if (Colliders.Length < 1)
-                return;
+            NativeList<int> bodyHashes = new NativeList<int>(2048 << 4, Allocator.Temp);
 
-            float3 min = float.MaxValue, max = float.MinValue;
             for (int i = 0; i < Colliders.Length; i++)
             {
                 var c = Colliders[i];
-                min = math.min(min, c.boundsMin);
-                max = math.max(max, c.boundsMax);
+                float3
+                    min = c.boundsMin,
+                    max = c.boundsMax;
+
+                bodyHashes.Clear();
+
+                if (math.lengthsq(max - min) > 25)
+                {
+                    HashUtility.CalculateAABBCellHashes(min, max, cellRadius,bucketCapacityMask, bodyHashes
+#if UNITY_EDITOR
+                                                      , VoxelDebug, Debug
+#endif
+                    );
+                }
+                else
+                {
+                    HashUtility.CalculateAABBCellHashesFast(min, max, cellRadius,bucketCapacityMask, bodyHashes
+#if UNITY_EDITOR
+                                                          , VoxelDebug, Debug
+#endif
+                    );
+                }
+
+                for (int j = 0; j < bodyHashes.Length; j++)
+                {
+                    RigidBodyHashes.AddNoResize(new BaseHash()
+                    {
+                        Index = i,
+                        Hash  = bodyHashes[j],
+                    });
+                }
             }
 
-            SceneBounds[0] = new PBDBounds()
-            {
-                Min = min,
-                Max = max,
-            };
-        }
-    }
-    
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct ReCaculateQuadPosition : IJobParallelFor
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<int>.ReadOnly UpdateList;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
-        
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<QuadPredictedPositions> QuadPredictedPositions;
-        
-        public void Execute(int index)
-        {
-            index = UpdateList[index];
-            int start = index * 4;
-            float3 pos = float3.zero;
-            for (int i = start; i < start + 4; i++)
-                pos += PredictedPositions[i].Value;
-
-            pos *= 0.25f;
-
-            QuadPredictedPositions[index] = new QuadPredictedPositions() { Value = pos };
+            bodyHashes.Dispose();
         }
     }
 
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct RigibodyCollisionJob : IJobParallelFor
+
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
+                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
+                  /*Debug = true,*/
+                  DisableSafetyChecks = true)]
+    public unsafe struct SPHRigibody2ParticleHashearchJob : IJobParallelForBatch
     {
-        [ReadOnly, NativeDisableParallelForRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
         public NativeArray<int>.ReadOnly UpdateList;
 
         [ReadOnly, NativeDisableParallelForRestriction]
@@ -2049,6 +2195,415 @@ namespace UnityEngine.PBD
         public NativeArray<RigiCollisionConstraint> RigiCollisionConstraints;
 
         [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<BaseHash> RigidBodyHashes;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public UnsafeParallelHashMap<PrecomputedHashKey, HashRange>.ReadOnly RigidBodyHashRanges;
+
+        [ReadOnly, NativeDisableParallelForRestriction, NativeFixedLength(27)]
+        public NativeArray<int3>.ReadOnly neighborOffsets;
+
+        [ReadOnly, NativeDisableParallelForRestriction, NativeFixedLength(1)]
+        public NativeArray<PBDBounds>.ReadOnly SceneBounds;
+
+        [ReadOnly] public float QuadRadius;
+        [ReadOnly] public float Friction;
+        [ReadOnly] public float Elasticity;
+        [ReadOnly] public float cellRadius; //不同于粒子格子尺寸
+        [ReadOnly] public int   bucketCapacityMask;
+
+#if UNITY_EDITOR
+        [WriteOnly, NativeDisableParallelForRestriction]
+        public NativeArray<PBDCollisionHit> DebugArray;
+#endif
+
+        public void Execute(int start, int count)
+        {
+//            if (RigidBodyHashes.Length < 1 || Colliders.Length < 1)
+//                return;
+
+            float qRadius = QuadRadius;
+            var   scence  = SceneBounds[0];
+            var   pBounds = new PBDBounds();
+
+            QuadCollisionHitInfos quadHitInfos = new QuadCollisionHitInfos();
+
+
+            int MAX_STACK_DEPTH = math.min(Constants.MAX_STACK_ALLOC, Colliders.Length);
+
+//            var hashSet = new NativeHashSet<int>(Colliders.Length, Allocator.Temp);
+            var hashSet = stackalloc ushort[MAX_STACK_DEPTH];
+            int counter = 0;
+
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            bool Add(ushort rbIndex)
+            {
+                for (int i = 0; i < counter; i++)
+                    if (hashSet[i] == rbIndex)
+                        return false;
+
+                hashSet[counter++] = rbIndex;
+                return true;
+            }
+
+
+            for (int index = start; index < start + count; index++)
+            {
+                int quadID = UpdateList[index];
+
+                float3 quadPos = QuadPredictedPositions[quadID].Value;
+
+                pBounds.Min = quadPos - qRadius;
+                pBounds.Max = quadPos + qRadius;
+
+                if (!MathematicsUtil.AABBOverlap(in scence, in pBounds))
+                    continue;
+
+                float pRadius = Radius[quadID].Value;
+
+                int4 indices = math.mad(quadID, 4, new int4(0, 1, 2, 3));
+
+                quadHitInfos.Clear();
+
+                int3 cellPos = HashUtility.PosToGrid(quadPos, cellRadius);
+                for (int offset = 0; offset < neighborOffsets.Length; offset++)
+                {
+                    int3 offsetPos = cellPos + neighborOffsets[offset];
+                    int  hash      = HashUtility.GridToHash(offsetPos, bucketCapacityMask);
+
+                    if (RigidBodyHashRanges.TryGetValue(hash, out var cell))
+                    {
+                        for (int j = cell.Start; j <= cell.End; j++)
+                        {
+                            var rigi      = RigidBodyHashes[j];
+                            int rigiIndex = rigi.Index;
+
+                            if (!Add((ushort)rigiIndex))
+                                continue;
+//                            if (!hashSet.Add(rigiIndex))
+//                                continue;
+
+                            var c = Colliders[rigiIndex];
+
+                            PBDBounds rbBounds = c.Bounds;
+
+                            if (!MathematicsUtil.AABBOverlap(in rbBounds, in pBounds))
+                                continue;
+
+                            for (int i = 0; i < 4; i++)
+                            {
+                                int pIndex = indices[i];
+                                float3 position = PredictedPositions[pIndex].Value,
+                                       velocity = Velocities[pIndex].Value;
+
+                                PBDCollisionHit hit = quadHitInfos.GetHit(i);
+
+                                if (c.Collide(in position, pRadius, Elasticity, Friction, ref velocity, ref hit))
+                                {
+                                    quadHitInfos.SetHit(i, hit);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (counter == 0)
+                    return;
+//                if(hashSet.IsEmpty )
+//                    continue;
+
+                for (int i = 0; i < 4; i++)
+                {
+                    int pIndex   = indices[i];
+                    var hit      = quadHitInfos.GetHit(i);
+                    int hitCount = hit.hitCount;
+                    if (hitCount > 0)
+                    {
+                        RigiCollisionConstraints[pIndex] = new RigiCollisionConstraint()
+                        {
+                            Delta    = hit.hitDelta,
+                            Velocity = hit.hitConcatDelta,
+                            // Normal = hit.hitNormal,
+                            // InsertDepth = hit.insertDepth,
+                            ConstraintsCount = hitCount,
+                        };
+                    }
+#if UNITY_EDITOR
+                    DebugArray[pIndex] = hit;
+#endif
+                }
+
+//                hashSet.Clear();
+                counter = 0;
+            }
+
+//            hashSet.Dispose();
+        }
+    }
+
+
+    [BurstCompile]
+    public struct UpdateSenceBounds : IJob
+    {
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
+        public NativeArray<PBDCustomColliderInfo>.ReadOnly Colliders;
+
+        [WriteOnly, NativeDisableParallelForRestriction, NativeFixedLength(1)]
+        public NativeArray<PBDBounds> SceneBounds;
+
+        public void Execute()
+        {
+//            if (Colliders.Length < 1)
+//                return;
+
+            float3 min = float.MaxValue, max = float.MinValue;
+            for (int i = 0; i < Colliders.Length; i++)
+            {
+                var c = Colliders[i];
+                min = math.min(min, c.boundsMin);
+                max = math.max(max, c.boundsMax);
+            }
+
+            SceneBounds[0] = new PBDBounds()
+            {
+                Min = min,
+                Max = max,
+            };
+        }
+    }
+
+    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
+    public struct ReCaculateQuadPosition : IJobParallelForBatch
+    {
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
+        public NativeArray<int>.ReadOnly UpdateList;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
+
+        [WriteOnly, NativeDisableParallelForRestriction]
+        public NativeArray<QuadPredictedPositions> QuadPredictedPositions;
+        
+        [ReadOnly]
+        private static readonly float4 weightMatrix = new float4(
+            0.25f, 0.25f, 0.25f, 0.25f
+        );
+
+        public unsafe void Execute(int start, int count)
+        {
+            var size = UnsafeUtility.SizeOf<PredictedPositions>() * 4;
+            
+            var updatePtr = (int*)UpdateList.GetUnsafeReadOnlyPtr();
+            var source    = (PredictedPositions*)PredictedPositions.GetUnsafeReadOnlyPtr();
+            var dest      = (QuadPredictedPositions*)QuadPredictedPositions.GetUnsafePtr();
+            
+            for (int index = start; index < start + count; index++)
+            {
+                int quadID = updatePtr[index];
+
+                float3x4 positions;
+                
+                UnsafeUtility.MemCpy(&positions, source + quadID * 4, size);
+
+                float3 pos = math.mul(positions, weightMatrix);
+                
+//                dest[quadID]       = new QuadPredictedPositions() { Value = pos };
+                dest[quadID].Value = pos;
+            }
+        }
+    }
+
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
+                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
+                  /*Debug = true,*/
+                  DisableSafetyChecks = true)]
+    public unsafe struct OctreeRigidbodyCollisionJob : IJobParallelForBatch
+    {
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
+        public NativeArray<int>.ReadOnly UpdateList;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<PBDCustomColliderInfo>.ReadOnly Colliders;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<Radius>.ReadOnly Radius;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<Velocity>.ReadOnly Velocities;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<QuadPredictedPositions>.ReadOnly QuadPredictedPositions;
+
+        [WriteOnly, NativeDisableParallelForRestriction]
+        public NativeArray<RigiCollisionConstraint> RigiCollisionConstraints;
+
+        [ReadOnly, NativeDisableParallelForRestriction, NativeFixedLength(1)]
+        public NativeArray<PBDBounds>.ReadOnly SceneBounds;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public RigidbodyOctree RigidbodyOctree;
+
+
+        [ReadOnly] public float QuadRadius;
+        [ReadOnly] public float Friction;
+        [ReadOnly] public float Elasticity;
+
+#if UNITY_EDITOR
+        [WriteOnly, NativeDisableParallelForRestriction]
+        public NativeArray<PBDCollisionHit> DebugArray;
+#endif
+
+        public void Execute(int start, int count)
+        {
+//            if (RigidbodyOctree.NodeLength < 1 || RigidbodyOctree.Nodes[0].IsEmpty)
+//                return;
+
+            int MAX_STACK_DEPTH = math.min(Constants.MAX_STACK_ALLOC, RigidbodyOctree.NodeLength);
+            
+            ushort* stack           = stackalloc ushort[MAX_STACK_DEPTH];
+            int     stackPtr        = 0;
+
+//            var stack = new NativeQueue<int>(Allocator.Temp);
+
+            QuadCollisionHitInfos quadHitInfos = new QuadCollisionHitInfos();
+
+            var   scence     = SceneBounds[0];
+            float qRadius    = QuadRadius;
+            int   nodeLength = RigidbodyOctree.NodeLength;
+            var   pBounds    = new PBDBounds();
+
+            for (int index = start; index < start + count; index++)
+            {
+                int    quadID  = UpdateList[index];
+                float3 quadPos = QuadPredictedPositions[quadID].Value;
+
+                pBounds.Min = quadPos - qRadius;
+                pBounds.Max = quadPos + qRadius;
+
+                if (!MathematicsUtil.AABBOverlap(in scence, in pBounds))
+                    continue;
+
+                float pRadius = Radius[quadID].Value;
+                int4  indices = math.mad(quadID, 4, new int4(0, 1, 2, 3));
+
+//                stack.Enqueue(0);
+                stack[stackPtr++] = 0;
+
+                quadHitInfos.Clear();
+
+//                while (stack.TryDequeue(out var nodeIndex))
+                while (stackPtr > 0)
+                {
+                    stackPtr--;
+                    var nodeIndex = stack[stackPtr];
+                    var node = RigidbodyOctree.Nodes[nodeIndex];
+
+                    for (int i = 0; i < node.RigidbodyCount; i++)
+                    {
+                        var rbIndex = RigidbodyOctree.RigidbodyIndices[node.RigidbodyStart + i];
+
+                        var c = Colliders[rbIndex];
+
+                        PBDBounds rbBounds = c.Bounds;
+
+                        if (!MathematicsUtil.AABBOverlap(in rbBounds, in pBounds))
+                            continue;
+
+                        for (int j = 0; j < 4; j++)
+                        {
+                            int pIndex = indices[j];
+
+                            float3
+                                position = PredictedPositions[pIndex].Value,
+                                // velocity = float3.zero;
+                                velocity = Velocities[pIndex].Value;
+
+                            PBDCollisionHit hit = quadHitInfos.GetHit(j);
+
+                            if (c.Collide(in position, pRadius, Elasticity, Friction, ref velocity, ref hit))
+                            {
+                                quadHitInfos.SetHit(j, hit);
+                            }
+                        }
+                    }
+
+                    if (!node.IsLeaf)
+                    {
+                        int firstChild = node.FirstChild;
+                        for (int i = 0; i < 8; i++)
+                        {
+                            int childIndex = firstChild + i;
+                            if (childIndex >= nodeLength) continue;
+
+                            var childNode = RigidbodyOctree.Nodes[childIndex];
+                            if (childNode.IsEmpty) continue;
+
+                            if (MathematicsUtil.AABBOverlap(childNode.Bounds, pBounds))
+//                                stack.Enqueue((ushort)childIndex);
+                                if(stackPtr < MAX_STACK_DEPTH)
+                                    stack[stackPtr++] = (ushort)childIndex;
+                        }
+                    }
+                }
+
+                // to unsafe MemCpy
+                for (int i = 0; i < 4; i++)
+                {
+                    int pIndex   = indices[i];
+                    var hit      = quadHitInfos.GetHit(i);
+                    int hitCount = hit.hitCount;
+                    if (hitCount > 0)
+                    {
+                        RigiCollisionConstraints[pIndex] = new RigiCollisionConstraint()
+                        {
+                            Delta    = hit.hitDelta,
+                            Velocity = hit.hitConcatDelta,
+                            // Normal = hit.hitNormal,
+                            // InsertDepth = hit.insertDepth,
+                            ConstraintsCount = hitCount,
+                        };
+                    }
+#if UNITY_EDITOR
+                    DebugArray[pIndex] = hit;
+#endif
+                }
+            }
+
+//            stack.Dispose();
+        }
+    }
+
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
+                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
+                  /*Debug = true,*/
+                  DisableSafetyChecks = true)]
+    public struct RigibodyCollisionJob : IJobParallelForBatch
+    {
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
+        public NativeArray<int>.ReadOnly UpdateList;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<PBDCustomColliderInfo>.ReadOnly Colliders;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<Radius>.ReadOnly Radius;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<Velocity>.ReadOnly Velocities;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<QuadPredictedPositions>.ReadOnly QuadPredictedPositions;
+
+        [WriteOnly, NativeDisableParallelForRestriction]
+        public NativeArray<RigiCollisionConstraint> RigiCollisionConstraints;
+
+        [ReadOnly, NativeDisableParallelForRestriction, NativeFixedLength(1)]
         public NativeArray<PBDBounds>.ReadOnly SceneBounds;
 
         [ReadOnly] public float QuadRadius;
@@ -2059,556 +2614,243 @@ namespace UnityEngine.PBD
         [WriteOnly, NativeDisableParallelForRestriction]
         public NativeArray<PBDCollisionHit> DebugArray;
 #endif
-        public void Execute(int index)
+
+        public void Execute(int start, int count)
         {
-            index = UpdateList[index];
-            int start = index * 4;
             float qRadius = QuadRadius;
 
             PBDBounds scence = SceneBounds[0];
 
-            float3 quadPos = QuadPredictedPositions[index].Value;
-
-            if (!MathematicsUtil.AABBOverlap(in quadPos, in qRadius, in scence.Min, in scence.Max))
-                return;
-
-            PointConstraints rigiConstraints = new PointConstraints();
-
             QuadCollisionHitInfos quadHitInfos = new QuadCollisionHitInfos();
-            
-            float pRadius = Radius[index].Value;
-            
-            //没考虑质量
-            for (int j = 0; j < Colliders.Length; j++)
-            {
-                var c = Colliders[j];
-                if (!MathematicsUtil.AABBOverlap(in quadPos, in qRadius, in c.boundsMin, in c.boundsMax))
-                    continue;
-                for (int i = 0; i < 4; i++)
-                {
-                    int pIndex = start + i;
-                    PBDCollisionHit hit = quadHitInfos.GetHit(i);
 
-                    float3
-                        position = PredictedPositions[pIndex].Value,
-                        velocity = Velocities[pIndex].Value;
-                    // velocity = float3.zero;
-                    if (c.Collide(in position, pRadius, Elasticity, Friction, ref rigiConstraints, i, ref velocity, ref hit))
+            for (int index = start; index < start + count; index++)
+            {
+                int quadID = UpdateList[index];
+
+                float3 quadPos = QuadPredictedPositions[quadID].Value;
+
+                if (!MathematicsUtil.AABBOverlap(in quadPos, in qRadius, in scence.Min, in scence.Max))
+                    continue;
+
+                int4  indices = math.mad(quadID, 4, new int4(0, 1, 2, 3));
+                float pRadius = Radius[quadID].Value;
+
+                quadHitInfos.Clear();
+
+                //没考虑质量
+                for (int j = 0; j < Colliders.Length; j++)
+                {
+                    var c = Colliders[j];
+                    if (!MathematicsUtil.AABBOverlap(in quadPos, in qRadius, in c.boundsMin, in c.boundsMax))
+                        continue;
+                    for (int i = 0; i < 4; i++)
                     {
-                        rigiConstraints.IncrementHitCount(i);
-                        quadHitInfos.SetHit(i, hit);
+                        int pIndex = indices[i];
+                        var hit    = quadHitInfos.GetHit(i);
+
+                        float3
+                            position = PredictedPositions[pIndex].Value,
+                            velocity = Velocities[pIndex].Value;
+                        // velocity = float3.zero;
+                        if (c.Collide(in position, pRadius, Elasticity, Friction, ref velocity, ref hit))
+                        {
+                            quadHitInfos.SetHit(i, hit);
+                        }
                     }
                 }
-            }
 
-            for (int i = 0; i < 4; i++)
-            {
-                int hitCount = rigiConstraints.GetHitCount(i);
-                int pIndex = start + i;
-                PBDCollisionHit hit = quadHitInfos.GetHit(i);
-                if (hitCount > 0)
+                for (int i = 0; i < 4; i++)
                 {
-                    RigiCollisionConstraints[pIndex] = new RigiCollisionConstraint()
+                    int pIndex   = indices[i];
+                    var hit      = quadHitInfos.GetHit(i);
+                    int hitCount = hit.hitCount;
+                    if (hitCount > 0)
                     {
-                        Delta = rigiConstraints[i].xyz,
-                        Velocity = hit.hitConcatDelta,
-                        Normal = hit.hitNormal,
-                        InsertDepth = hit.insertDepth,
-                        ConstraintsCount = hitCount,
-                        // LastHit = hit,
-                    };
+                        RigiCollisionConstraints[pIndex] = new RigiCollisionConstraint()
+                        {
+                            Delta    = hit.hitDelta,
+                            Velocity = hit.hitConcatDelta,
+                            // Normal = hit.hitNormal,
+                            // InsertDepth = hit.insertDepth,
+                            ConstraintsCount = hitCount,
+                        };
+                    }
+#if UNITY_EDITOR
+                    DebugArray[pIndex] = hit;
+#endif
                 }
-#if UNITY_EDITOR
-                DebugArray[pIndex] = hit;
-#endif
-
             }
 
         }
     }
+
+#endregion
+
     
-#if UNITY_EDITOR
+    
+#region Clear
+    
+    
     [BurstCompile]
-    public struct ClearDebugHitInfo : IJobParallelFor
+    public struct ClearList<T> : IJob where T : unmanaged
     {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<int>.ReadOnly UpdateList;
-        
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PBDCollisionHit> DebugArray;
-        public void Execute(int index)
-        {
-            index = UpdateList[index];
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
-            PBDCollisionHit clearHit = new PBDCollisionHit(){ isHit = false };
-            DebugArray[indices.x] = clearHit;
-            DebugArray[indices.y] = clearHit;
-            DebugArray[indices.z] = clearHit;
-            DebugArray[indices.w] = clearHit;
-        }
-    }
-
-#endif
-
-    #endregion
-
-    
-    #region LastUpdateData
-    
-
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct UpdateVelocityJob : IJobParallelFor
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<int>.ReadOnly UpdateList;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<Position>.ReadOnly Positions;
-        
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<Velocity> Velocities;
-
-        [ReadOnly] public float InvDeltaTime;
-
-        public void Execute(int index)
-        {
-            index = UpdateList[index];
-            
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
-               
-            float3x4 predictedPositions = new float3x4(
-                PredictedPositions[indices.x].Value,
-                PredictedPositions[indices.y].Value,
-                PredictedPositions[indices.z].Value,
-                PredictedPositions[indices.w].Value
-            );
-            
-            float3x4 oldPositions = new float3x4(
-                Positions[indices.x].Value,
-                Positions[indices.y].Value,
-                Positions[indices.z].Value,
-                Positions[indices.w].Value
-            );
-            
-            float3x4 velocities = (predictedPositions - oldPositions) * InvDeltaTime;
-            
-            Velocities[indices.x] = new Velocity() { Value = velocities.c0 };
-            Velocities[indices.y] = new Velocity() { Value = velocities.c1 };
-            Velocities[indices.z] = new Velocity() { Value = velocities.c2 };
-            Velocities[indices.w] = new Velocity() { Value = velocities.c3 };
-        }
-    }
-
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct UpdateNormalAreaJob : IJobParallelFor
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<int>.ReadOnly UpdateList;
-        
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
-        
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<Normal> Normals;
-
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<Area> Areas;
-        public void Execute(int index)
-        {
-            index = UpdateList[index];
-
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
-            
-            float3
-                p0 = PredictedPositions[indices.x].Value,
-                p1 = PredictedPositions[indices.y].Value,
-                p2 = PredictedPositions[indices.z].Value,
-                p3 = PredictedPositions[indices.w].Value;
-            
-            float3
-                a = (p0 - p1),
-                b = (p2 - p1),
-                c = (p3 - p1);
-            float3 perpA = math.cross(a, b);
-            float3 perpB = math.cross(b, c);
-            float perpLenA = math.length(perpA);
-            float perpLenB = math.length(perpB);
-            float areaA = perpLenA * 0.5f;
-            float areaB = perpLenB * 0.5f;
-            float areaP = (areaA + areaB) * 0.5f;
-
-            Areas[indices.x] = new Area() { Value = areaA };
-            Areas[indices.y] = new Area() { Value = areaP };
-            Areas[indices.z] = new Area() { Value = areaP };
-            Areas[indices.w] = new Area() { Value = areaB };
-            
-            float3 
-                na = (perpA / perpLenA),
-                nb = (perpB / perpLenB);
-
-            Normals[indices.x] = new Normal() { Value = na };
-            Normals[indices.y] = new Normal() { Value = na };
-            Normals[indices.z] = new Normal() { Value = nb };
-            Normals[indices.w] = new Normal() { Value = nb };
-        }
-    }
-
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct UpdateMeshPosJob : IJobParallelFor
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<int>.ReadOnly UpdateList;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
-        
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<float3> pos;
-        
-        public void Execute(int index)
-        {
-            index = UpdateList[index];
-
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
-            
-            pos[indices.x] = PredictedPositions[indices.x].Value;
-            pos[indices.y] = PredictedPositions[indices.y].Value;
-            pos[indices.z] = PredictedPositions[indices.z].Value;
-            pos[indices.w] = PredictedPositions[indices.w].Value;
-        }
-    }
-
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct UpdateMeshNormalJob : IJobParallelFor
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<int>.ReadOnly UpdateList;
-        
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<Normal>.ReadOnly Normals;
-        
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<float2> normal;
-        
-        public void Execute(int index)
-        {
-            index = UpdateList[index];
-
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
-            
-            float3 
-                na = Normals[indices.x].Value,
-                nb = Normals[indices.w].Value;
-
-            float3 np = math.normalize(na + nb);
-
-            float2 
-                octNA = MathematicsUtil.UnitVectorToOctahedron(na),
-                octNB = MathematicsUtil.UnitVectorToOctahedron(nb),
-                octNP = MathematicsUtil.UnitVectorToOctahedron(np);
-            
-            normal[indices.x] = octNA;
-            normal[indices.y] = octNP;
-            normal[indices.z] = octNP;
-            normal[indices.w] = octNB;
-        }
-    }
-    
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct UpdateFrustumMeshPosJob : IJob
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeList<int> RenderList;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
-        
-        [WriteOnly, NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
-        public NativeArray<float3> pos;
-        
-        [ReadOnly] public int JobID;
-
-        [ReadOnly] public int JobNum;
-        
-        public void Execute()
-        {
-            int length = RenderList.Length;
-            if(length < 1 || JobNum < 1)
-                return;
-
-            int jobLength = (length + 1) / JobNum;
-            int start = jobLength * JobID,
-                end = math.min(math.mad(jobLength, JobID, jobLength), length);
-
-            for (int index = start; index < end; index++)
-            {
-                int quadID = RenderList[index];
-            
-                if(quadID < 0)
-                    return;
-
-                int4 indiceStep = new int4(0, 1, 2, 3);
-
-                int4
-                    indices = math.mad(index, 4, indiceStep),
-                    quadIndices = math.mad(quadID, 4, indiceStep);
-            
-                pos[indices.x] = PredictedPositions[quadIndices.x].Value;
-                pos[indices.y] = PredictedPositions[quadIndices.y].Value;
-                pos[indices.z] = PredictedPositions[quadIndices.z].Value;
-                pos[indices.w] = PredictedPositions[quadIndices.w].Value;
-            }
-        }
-    }
-
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct UpdateFrustumMeshNormalJob : IJob
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeList<int> RenderList;
-        
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<Normal>.ReadOnly Normals;
-        
-        [WriteOnly, NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
-        public NativeArray<float2> normal;
-        
-        [ReadOnly] public int JobID;
-
-        [ReadOnly] public int JobNum;
-
-        public void Execute()
-        {
-            int length = RenderList.Length;
-            if (length < 1 || JobNum < 1)
-                return;
-
-            int jobLength = (length + 1) / JobNum;
-            int start = jobLength * JobID,
-                end = math.min(math.mad(jobLength, JobID, jobLength), length);
-
-            for (int index = start; index < end; index++)
-            {
-                int quadID = RenderList[index];
-
-                if (quadID < 0)
-                    return;
-
-                int4 indiceStep = new int4(0, 1, 2, 3);
-
-                int4
-                    indices = math.mad(index, 4, indiceStep),
-                    quadIndices = math.mad(quadID, 4, indiceStep);
-
-                float3
-                    na = Normals[quadIndices.x].Value,
-                    nb = Normals[quadIndices.y].Value;
-
-                float3 np = math.normalize(na + nb);
-
-                float2
-                    octNA = MathematicsUtil.UnitVectorToOctahedron(na),
-                    octNB = MathematicsUtil.UnitVectorToOctahedron(nb),
-                    octNP = MathematicsUtil.UnitVectorToOctahedron(np);
-
-
-                normal[indices.x] = octNA;
-                normal[indices.y] = octNP;
-                normal[indices.z] = octNP;
-                normal[indices.w] = octNB;
-            }
-        }
-    }
-
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct UpdateFrustumMeshUVJob : IJob
-    {
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeList<int> RenderList;
-
-        [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<half2>.ReadOnly uvs;
-
-        [WriteOnly, NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
-        public NativeArray<half2> uvsForRendering;
-
-        [ReadOnly] public int JobID;
-
-        [ReadOnly] public int JobNum;
-
-        public void Execute()
-        {
-            int length = RenderList.Length;
-            if (length < 1 || JobNum < 1)
-                return;
-
-            int jobLength = (length + 1) / JobNum;
-            int start = jobLength * JobID,
-                end = math.min(math.mad(jobLength, JobID, jobLength), length);
-
-            for (int index = start; index < end; index++)
-            {
-                int quadID = RenderList[index];
-
-                if (quadID < 0)
-                    return;
-
-                int4 indiceStep = new int4(0, 1, 2, 3);
-
-                int4
-                    indices = math.mad(index, 4, indiceStep),
-                    quadIndices = math.mad(quadID, 4, indiceStep);
-
-                uvsForRendering[indices.x] = uvs[quadIndices.x];
-                uvsForRendering[indices.y] = uvs[quadIndices.y];
-                uvsForRendering[indices.z] = uvs[quadIndices.z];
-                uvsForRendering[indices.w] = uvs[quadIndices.w];
-            }
-        }
-    }
-
-
-    #endregion
-
-    [BurstCompile]
-    public struct ClearJobHandleListJob : IJob
-    {
-        [WriteOnly]
-        public NativeList<JobHandle> List;
+        [WriteOnly] public NativeList<T> List;
 
         public void Execute()
         {
             List.Clear();
         }
     }
+    
 
     [BurstCompile]
-    public struct ClearListJob : IJob
+    public struct ClearHashNeighbours : IJob
     {
-        [WriteOnly]
-        public NativeList<int> List;
-
+        [WriteOnly] public NativeParallelMultiHashMap<int, int> hashMap;
         public void Execute()
         {
-            List.Clear();
+            hashMap.Clear();
         }
     }
 
     [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct ClearNativeArrayJob : IJobParallelFor
+    public struct ClearConstraintsArray<T> : IJobParallelForBatch where T : unmanaged
     {
+        [ReadOnly, NativeDisableParallelForRestriction, NativeMatchesParallelForLength]
+        public NativeArray<int>.ReadOnly UpdateList;
+
         [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeArray<int> NativeArray;
-        
-        public void Execute(int index)
+        public NativeArray<T> Constraints;
+
+        public unsafe void Execute(int start, int count)
         {
-            NativeArray[index] = -1;
+            var clearCnstr = default(T);
+            var stride     = UnsafeUtility.SizeOf<T>();
+
+            var updatePtr = (int*)UpdateList.GetUnsafeReadOnlyPtr();
+            var destPtr   = (T*)Constraints.GetUnsafePtr();
+
+            for (int index = start; index < start + count; index++)
+            {
+                int offset = updatePtr[index] * 4;
+
+                UnsafeUtility.MemCpyReplicate(destPtr + offset, &clearCnstr, stride, 4);
+            }
         }
     }
+
+
+    [BurstCompile]
+    public struct ClearHashMapJob<T> : IJob where T : unmanaged
+    {
+        [WriteOnly] public UnsafeParallelHashMap<PrecomputedHashKey, T> hashRanges;
+        
+        public void Execute()
+        {
+            hashRanges.Clear();
+        }
+    }
+    
+    [BurstCompile]
+    public struct ClearSimpleHashMapJob<T> : IJob where T : unmanaged
+    {
+        [WriteOnly, NativeDisableUnsafePtrRestriction]
+        public SimpleHashArray<T> hashRanges;
+        
+        public void Execute()
+        {
+            hashRanges.Clear();
+        }
+    }
+    
+#endregion
 
 
     //多线程标记在视锥内
-    [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct CaculateInFrustumJob : IJobParallelFor
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
+                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
+                  /*Debug = true,*/
+                  DisableSafetyChecks = true)]
+    public struct CaculateInFrustumJob : IJobParallelForBatch
     {
         [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PredictedPositions> PredictedPositions;
+        public NativeArray<PredictedPositions>.ReadOnly PredictedPositions;
 
         [WriteOnly, NativeDisableParallelForRestriction]
         public NativeArray<IsNeedRender> IsNeedRenders;
 
         [ReadOnly] public float4x4 CullingMatrix;
-
-        public void Execute(int index)
+        
+        public unsafe void Execute(int start, int count)
         {
-            int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
-
-            for (int j = 0; j < 4; j++)
+            var (currentStart, remaining) = (start, count);
+            
+            var tempResults  = stackalloc bool[Constants.MAX_STACK_ALLOC];
+            var renderPtr    = (IsNeedRender*)IsNeedRenders.GetUnsafePtr();
+            var stride       = UnsafeUtility.SizeOf<IsNeedRender>();
+            
+            while (remaining > 0)
             {
-                if (MathematicsUtil.InFrustum(in CullingMatrix,  PredictedPositions[indices[j]].Value))
+                int batchSize   = math.min(remaining, Constants.MAX_STACK_ALLOC);
+
+                for (int i = 0; i < batchSize; i++)
                 {
-                    IsNeedRenders[index] = new IsNeedRender() { Value = true };
-                    return;
+                    int  index   = currentStart + i;
+                    int4 indices = math.mad(index, 4, new int4(0, 1, 2, 3));
+                    
+                    bool needRender = false;
+                    for (int j = 0; j < 4; j++)
+                    {
+                        if (MathematicsUtil.InFrustum(in CullingMatrix, PredictedPositions[indices[j]].Value))
+                        {
+                            needRender = true;
+                            break;
+                        }
+                    }
+
+                    tempResults[i] = needRender;
                 }
+
+                UnsafeUtility.MemCpy(renderPtr + currentStart, tempResults, stride * batchSize);
+                remaining    -= batchSize;
+                currentStart += batchSize;
             }
-            IsNeedRenders[index] = new IsNeedRender() { Value = false };
         }
     }
     
-    //单线程顺序收集
     [BurstCompile(FloatPrecision.Low, FloatMode.Fast)]
-    public struct CollectInFrustumJob : IJob
+    public struct InFrustumFilterJob : IJobFilterRange
     {
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<IsNeedRender>.ReadOnly IsNeedRenders;
-
-        [WriteOnly]
-        public NativeList<int> RenderList;
         
-        [WriteOnly] public NativeArray<int> RenderCounter;
-
-        [ReadOnly] public int QuadCount;
-        
-        public void Execute()
+        public bool Execute(int index)
         {
-            int writeIndex = 0;
-            for (int index = 0; index < QuadCount; index ++)
-            {
-                if (IsNeedRenders[index].Value)
-                {
-                    RenderList.AddNoResize(index);
-                    writeIndex++;
-                }
-            }
-
-            RenderCounter[0] = writeIndex;
-        }
-    }
-
-
-    [BurstCompile]
-    public struct CollectNeedUpdateQuadIndex : IJob
-    {
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeList<int>.ParallelWriter UpdateList;
-
-        [ReadOnly, NativeDisableParallelForRestriction] 
-        public NativeArray<IsNeedUpdate>.ReadOnly IsNeedUpdates;
-
-        [ReadOnly] public int Length;
-
-        public void Execute()
-        {
-            for (int i = 0; i < Length; i++)
-            {
-                if (IsNeedUpdates[i].Value)
-                    UpdateList.AddNoResize(i);
-            }
+            return IsNeedRenders[index].Value;
         }
     }
     
-    
     [BurstCompile]
-    public struct CollectStaticQuadIndex : IJob
+    public struct UpdateQuadFilter : IJobFilterRange
     {
-        [WriteOnly, NativeDisableParallelForRestriction]
-        public NativeList<int>.ParallelWriter StaticList;
-
-        [ReadOnly, NativeDisableParallelForRestriction] 
+        [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<IsNeedUpdate>.ReadOnly IsNeedUpdates;
 
-        [ReadOnly] public int Length;
-
-        public void Execute()
+        public bool Execute(int index)
         {
-            for (int i = 0; i < Length; i++)
-            {
-                if (!IsNeedUpdates[i].Value)
-                    StaticList.AddNoResize(i);
-            }
+            return IsNeedUpdates[index].Value;
+        }
+    }
+    
+    [BurstCompile]
+    public struct StaticQuadFilter : IJobFilterRange
+    {
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<IsNeedUpdate>.ReadOnly IsNeedUpdates;
+
+        public bool Execute(int index)
+        {
+            return !IsNeedUpdates[index].Value;
         }
     }
 }

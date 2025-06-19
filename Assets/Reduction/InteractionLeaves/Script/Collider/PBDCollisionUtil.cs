@@ -10,83 +10,48 @@ namespace UnityEngine.PBD
         //将粒子限制在plane normal正向
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool OutsidePlane(in float3 particlePosition, float particleRadius, in float3 center,
-            in float3 up, in float3 forward, in float3 right, in float4 size, bool isInfinitePlane,
-            ref PointConstraints delta, int index, ref float3 velocity, ref PBDCollisionHit hit, float elasticity, float friction, bool useConcatNormal = true)
+            in float3 up, in float3 forward, in float3 right, in float4 size,
+            ref float3 velocity, ref PBDCollisionHit hit, float elasticity, float friction, bool useConcatNormal = true)
         {
             float3 toParticle = particlePosition - center;
             float d = math.dot(toParticle, up);
             if (d < particleRadius)
             {
-                if (isInfinitePlane)
+                float3 pProjToPlane = toParticle - d * up;
+
+                float
+                    x = math.dot(pProjToPlane, right) * 2,
+                    y = math.dot(pProjToPlane, forward) * 2;
+                if (math.abs(x) < size.x && math.abs(y) < size.y)
                 {
                     float insertDepth = particleRadius - d;
-                    float3 pushout = up * (insertDepth + 1e-5f);
-
+                    float3 pushout = up * insertDepth;
                     if (useConcatNormal)
                     {
                         float3 concatNormal = CalculateContactNormal(toParticle + pushout + up * size.w);
                         float3 prejictedDelta = ReboundPositionDelta(insertDepth, pushout, concatNormal, elasticity, friction);
 
-                        delta.AddConstraint(index, pushout);
-                        // delta.AddConstraint(index, prejictedDelta);
-                        // velocity = math.lerp(velocity, prejictedDelta, velocity);
-                        velocity = prejictedDelta; //罪恶的开始
-
+                        hit.hitDelta += pushout;
+                        velocity     =  prejictedDelta;
+                        
                         hit.hitConcatDelta = prejictedDelta;
                         hit.hitConcatNormal = concatNormal;
                     }
                     else
                     {
-                        delta.AddConstraint(index, pushout);
-                        velocity = ReboundVelocity(velocity, up, elasticity, friction);
-                        hit.hitConcatDelta = pushout;
-                        hit.hitConcatNormal = up;
+                        hit.hitDelta        += pushout;
+                        velocity            =  ReboundVelocity(velocity, up, elasticity, friction);
+                        hit.hitConcatDelta  =  pushout;
+                        hit.hitConcatNormal =  up;
                     }
-                    hit.isHit = true;
-                    hit.insertDepth = insertDepth;
-                    hit.hitSurfacePos = pushout + particlePosition;
-                    hit.hitActorCenter = center + up * 1e-5f;
+
+                    hit.hitCount++;
+                    hit.insertDepth   = insertDepth;
+                    hit.hitSurfacePos = pProjToPlane + center;
+                    // hit.hitActorCenter = center + up * 1e-5f;
                     hit.hitNormal = up;
 
                     return true;
-                }
-                else
-                {
-                    float3 pProjToPlane = toParticle - d * up;
-
-                    float
-                        x = math.dot(pProjToPlane, right) * 2,
-                        y = math.dot(pProjToPlane, forward) * 2;
-                    if (math.abs(x) < size.x && math.abs(y) < size.y)
-                    {
-                        float insertDepth = particleRadius - d;
-                        float3 pushout = up * (insertDepth + 1e-5f);
-                        if (useConcatNormal)
-                        {
-                            float3 concatNormal = CalculateContactNormal(toParticle + pushout + up * size.w);
-                            float3 prejictedDelta = ReboundPositionDelta(insertDepth, pushout, concatNormal, elasticity, friction);
-
-                            delta.AddConstraint(index, pushout);
-                            // delta.AddConstraint(index, prejictedDelta);
-                            velocity = prejictedDelta;
-                            hit.hitConcatDelta = prejictedDelta;
-                            hit.hitConcatNormal = concatNormal;
-                        }
-                        else
-                        {
-                            delta.AddConstraint(index, pushout);
-                            velocity = ReboundVelocity(velocity, up, elasticity, friction);
-                            hit.hitConcatDelta = pushout;
-                            hit.hitConcatNormal = up;
-                        }
-                        hit.isHit = true;
-                        hit.insertDepth = insertDepth;
-                        hit.hitSurfacePos = pProjToPlane + center;
-                        hit.hitActorCenter = center + up * 1e-5f;
-                        hit.hitNormal = up;
-
-                        return true;
-                    }
                 }
             }
 
@@ -97,7 +62,7 @@ namespace UnityEngine.PBD
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool OutsideBox(in float3 particlePosition, float particleRadius, in float3 center,
             in float3 up, in float3 forward, in float3 right, in float4 size,
-            ref PointConstraints delta, int index, ref float3 velocity, ref PBDCollisionHit hit, float elasticity, float friction, bool useConcatNormal = true)
+            ref float3 velocity, ref PBDCollisionHit hit, float elasticity, float friction, bool useConcatNormal = true)
         {
             float3 toParticle = particlePosition - center;
             float3 localPos = new float3(
@@ -135,25 +100,24 @@ namespace UnityEngine.PBD
                     float3 concatNormal = CalculateContactNormal(toParticle + pushout + normal * size.w);
                     float3 prejictedDelta = ReboundPositionDelta(minPenetration, pushout, concatNormal, elasticity, friction);
                     
-                    delta.AddConstraint(index, pushout);
-                    // delta.AddConstraint(index, prejictedDelta);
-                    velocity = prejictedDelta;
+                    hit.hitDelta += pushout;
+                    velocity     =  prejictedDelta;
                     
                     hit.hitConcatDelta = prejictedDelta;
                     hit.hitConcatNormal = concatNormal;
                 }
                 else
                 {
-                    delta.AddConstraint(index, pushout);
-                    velocity = ReboundVelocity(velocity, normal, elasticity, friction);
+                    hit.hitDelta += pushout;
+                    velocity     =  ReboundVelocity(velocity, normal, elasticity, friction);
                     
                     hit.hitConcatDelta = velocity;
                     hit.hitConcatNormal = normal;
                 }
 
-                hit.isHit = true;
+                hit.hitCount++;
                 hit.hitSurfacePos = pushout + particlePosition;
-                hit.hitActorCenter = center;
+                // hit.hitActorCenter = center;
                 hit.hitNormal = normal;
                 return true;
             }
@@ -164,7 +128,7 @@ namespace UnityEngine.PBD
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool OutsideSphere(in float3 particlePosition, float particleRadius,
             float3 sphereCenter, float sphereRadius,
-            ref PointConstraints particleDelta, int index, ref float3 particleVelocity, ref PBDCollisionHit hit, 
+            ref float3 particleVelocity, ref PBDCollisionHit hit, 
             float elasticity, float friction, bool useConcatNormal = true)
         {
             float r = sphereRadius + particleRadius;
@@ -183,7 +147,7 @@ namespace UnityEngine.PBD
                 ReboundPositionDeltaInSphere(in particlePosition,
                     r, in sphereCenter, 
                     dlen, in d,
-                    ref particleDelta, index, ref particleVelocity, ref hit,
+                    ref particleVelocity, ref hit,
                     elasticity, friction, useConcatNormal);
                 
                 return true;
@@ -197,7 +161,7 @@ namespace UnityEngine.PBD
         public static bool OutsideCapsule(in float3 particlePosition, float particleRadius,
             float3 capsuleP0, float3 capsuleP1,
             float capsuleRadius, float dirlen,
-            ref PointConstraints particleDelta, int index, ref float3 particleVelocity, ref PBDCollisionHit hit,
+            ref float3 particleVelocity, ref PBDCollisionHit hit,
             float elasticity, float friction, bool useConcatNormal = true)
         {
             float r = capsuleRadius + particleRadius;
@@ -221,7 +185,7 @@ namespace UnityEngine.PBD
                     ReboundPositionDeltaInSphere(in particlePosition,
                         r, in capsuleP0, 
                         dlen, in d,
-                        ref particleDelta, index, ref particleVelocity, ref hit,
+                        ref particleVelocity, ref hit,
                         elasticity, friction, useConcatNormal);
                     
                     // particleVelocity = ReboundVelocity(particleVelocity, d, elasticity, friction);
@@ -247,7 +211,7 @@ namespace UnityEngine.PBD
                         ReboundPositionDeltaInSphere(in particlePosition,
                             r, in capsuleP1, 
                             dlen, in d,
-                            ref particleDelta, index, ref particleVelocity, ref hit,
+                            ref particleVelocity, ref hit,
                             elasticity, friction, useConcatNormal);
 
                         // particleVelocity = ReboundVelocity(particleVelocity, d, elasticity, friction);
@@ -275,25 +239,24 @@ namespace UnityEngine.PBD
                             float3 concatNormal = CalculateContactNormal(particlePosition - center);
                             float3 prejictedDelta = ReboundPositionDelta(insertDepth, pushout, concatNormal, elasticity, friction);
 
-                            particleDelta.AddConstraint(index, pushout);
-                            // particleDelta.AddConstraint(index, prejictedDelta);
-                            particleVelocity = prejictedDelta;
-                            hit.hitConcatDelta = prejictedDelta;
-                            hit.hitConcatNormal = concatNormal;
+                            hit.hitDelta        += pushout;
+                            particleVelocity    =  prejictedDelta;
+                            hit.hitConcatDelta  =  prejictedDelta;
+                            hit.hitConcatNormal =  concatNormal;
                         }
                         else
                         {
-                            particleDelta.AddConstraint(index, pushout);
-                            particleVelocity = ReboundVelocity(particleVelocity, q, elasticity, friction);
+                            hit.hitDelta     += pushout;
+                            particleVelocity =  ReboundVelocity(particleVelocity, q, elasticity, friction);
                     
                             hit.hitConcatDelta = particleVelocity;
                             hit.hitConcatNormal = q;
                         }
 
-                        hit.isHit = true;
+                        hit.hitCount++;
                         hit.insertDepth = insertDepth;
                         hit.hitSurfacePos = pushout + particlePosition;
-                        hit.hitActorCenter = center;
+                        // hit.hitActorCenter = center;
                         hit.hitNormal = q;
 
                         return true;
@@ -308,7 +271,7 @@ namespace UnityEngine.PBD
         public static bool OutsideCapsule2(in float3 particlePosition, float particleRadius,
             float3 capsuleP0, float3 capsuleP1,
             float capsuleRadius0, float capsuleRadius1, float dirlen,
-            ref PointConstraints particleDelta, in int index, ref float3 particleVelocity, ref PBDCollisionHit hit, 
+            ref float3 particleVelocity, ref PBDCollisionHit hit, 
             float elasticity, float friction, bool useConcatNormal = true)
         {
             float3 dir = capsuleP1 - capsuleP0;
@@ -331,7 +294,7 @@ namespace UnityEngine.PBD
                     ReboundPositionDeltaInSphere(in particlePosition,
                         r, in capsuleP0, 
                         dlen, in d,
-                        ref particleDelta, index, ref particleVelocity, ref hit,
+                        ref particleVelocity, ref hit,
                         elasticity, friction, useConcatNormal);
 
                     // particleVelocity = ReboundVelocity(particleVelocity, d, elasticity, friction);
@@ -359,7 +322,7 @@ namespace UnityEngine.PBD
                         ReboundPositionDeltaInSphere(in particlePosition,
                             r, in capsuleP1, 
                             dlen, in d,
-                            ref particleDelta, index, ref particleVelocity, ref hit,
+                            ref particleVelocity, ref hit,
                             elasticity, friction, useConcatNormal);
                         
                         // particleVelocity = ReboundVelocity(particleVelocity, d, elasticity, friction);
@@ -392,8 +355,7 @@ namespace UnityEngine.PBD
                             float3 concatNormal = CalculateContactNormal(particlePosition - center);
                             float3 prejictedDelta = ReboundPositionDelta(insertDepth, pushout, concatNormal, elasticity, friction);
 
-                            particleDelta.AddConstraint(index, pushout);
-                            // particleDelta.AddConstraint(index, prejictedDelta);
+                            hit.hitDelta += pushout;
 
                             particleVelocity = prejictedDelta;
                             // particleDelta += prejictedDelta;
@@ -404,17 +366,17 @@ namespace UnityEngine.PBD
                         }
                         else
                         {
-                            particleDelta.AddConstraint(index, pushout);
-                            particleVelocity = ReboundVelocity(particleVelocity, q, elasticity, friction);
+                            hit.hitDelta     += pushout;
+                            particleVelocity =  ReboundVelocity(particleVelocity, q, elasticity, friction);
                     
                             hit.hitConcatDelta = particleVelocity;
                             hit.hitConcatNormal = q;
                         }
 
-                        hit.isHit = true;
+                        hit.hitCount++;
                         hit.insertDepth = insertDepth;
                         hit.hitSurfacePos = pushout + particlePosition;
-                        hit.hitActorCenter = center;
+                        // hit.hitActorCenter = center;
                         hit.hitNormal = q;
 
                         return true;
@@ -422,70 +384,6 @@ namespace UnityEngine.PBD
                 }
             }
 
-            return false;
-        }
-
-        /// <summary>
-        /// 废弃
-        /// </summary>
-        /// <param name="particlePosition"></param>
-        /// <param name="op">sphereCenter-particlePosition</param>
-        /// <param name="sphereCenter"></param>
-        /// <param name="R2">r*r</param>
-        /// <param name="particleDelta"></param>
-        /// <param name="particleVelocity"></param>
-        /// <returns></returns>
-        static bool HitInSpherePrecise(in float3 particlePosition, float3 op, float3 sphereCenter, float R2,
-            ref PointConstraints particleDelta, int index, ref float3 particleVelocity, float elasticity, float friction)
-        {
-            float3 rayDir = MathematicsUtil.Normalize(-particleVelocity);
-
-            bool bHit = InSphereRayIntersection(op, rayDir, R2, out float ti);
-
-            float3 insertOffset = ti * rayDir;
-
-            float3 hitPos = particlePosition + insertOffset;
-
-            float3 hitNormal = MathematicsUtil.Normalize(hitPos - sphereCenter);
-
-            particleVelocity = ReboundVelocity(particleVelocity, hitNormal, elasticity, friction);
-
-            float3 newPos = hitPos + MathematicsUtil.Normalize(particleVelocity) * math.length(insertOffset);
-
-            particleDelta.SetConstraint(index, newPos - particlePosition);
-
-            return bHit;
-        }
-
-        //https://zhuanlan.zhihu.com/p/136763389
-        static bool InSphereRayIntersection(
-            float3 op, float3 rayDirection, float R2, out float t)
-        {
-            // float3 op = sphereCenter - rayOrigin;
-            float a2 = math.dot(op, op);
-            float l = math.dot(rayDirection, op);
-            // float R2 = sphereRadius * sphereRadius;
-            // if (a2 > R2 && l < 0)
-            // {
-            //     t = -1;
-            //     return false;
-            // }
-
-            float m2 = a2 - l * l;
-            float q2 = R2 - m2;
-
-            if (q2 > 0)
-            {
-                float q = math.sqrt(q2);
-                // if (a2 > R2)
-                //     t = l - q;
-                // else
-                t = l + q;
-
-                return true;
-            }
-
-            t = -1;
             return false;
         }
 
@@ -516,7 +414,7 @@ namespace UnityEngine.PBD
         static void ReboundPositionDeltaInSphere(in float3 particlePosition,
             float radiusSum, in float3 sphereCenter,
             float dislen, in float3 concatNormal,
-            ref PointConstraints particleDelta, int index, ref float3 particleVelocity, ref PBDCollisionHit hit, 
+            ref float3 particleVelocity, ref PBDCollisionHit hit, 
             float elasticity, float friction, bool useConcatNormal = true)
         {
             float insertDepth = radiusSum - dislen;
@@ -525,8 +423,7 @@ namespace UnityEngine.PBD
             {
                 float3 prejictedDelta = ReboundPositionDelta(insertDepth, pushout, concatNormal, elasticity, friction);
                 // particleDelta += prejictedDelta;
-                particleDelta.AddConstraint(index, pushout);
-                // particleDelta.AddConstraint(index, prejictedDelta);
+                hit.hitDelta += pushout;
 
                 particleVelocity = prejictedDelta;
 
@@ -535,16 +432,16 @@ namespace UnityEngine.PBD
             }
             else
             {
-                particleDelta.AddConstraint(index, pushout);
-                particleVelocity = ReboundVelocity(particleVelocity, concatNormal, elasticity, friction);
+                hit.hitDelta     += pushout;
+                particleVelocity =  ReboundVelocity(particleVelocity, concatNormal, elasticity, friction);
                     
                 hit.hitConcatDelta = particleVelocity;
                 hit.hitConcatNormal = concatNormal;
             }
-            hit.isHit = true;
+            hit.hitCount++;
             hit.insertDepth = insertDepth;
             hit.hitSurfacePos = pushout + particlePosition;
-            hit.hitActorCenter = sphereCenter;
+            // hit.hitActorCenter = sphereCenter;
             hit.hitNormal = concatNormal;
         }
 

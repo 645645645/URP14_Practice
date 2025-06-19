@@ -5,33 +5,37 @@ namespace UnityEngine.PBD
     [DisallowMultipleComponent]
     public class PBDForce : MonoBehaviour
     {
+        [Header("旧力场改崩了，两边物理量不一样，不想抢救了"), Space]
         public PBDForceType m_ForceType;
-        
-        [Tooltip("一般是xz水平方向，y竖直")]
-        public Vector3 m_Force = Vector3.zero;
-        
+
+        [Tooltip("一般是xz水平方向，y竖直")] public Vector3 m_Force = Vector3.zero;
+
         public Vector3 m_Center = Vector3.zero;
-        
+
         // [Delayed]
         public float m_Radius = 0.5f;
 
+        [Min(0)] public float m_ForceRatio = 1;
+
         [Range(1, 60)] public float m_LerpPosRatio = 10;
 
-        private PBDForceType _lastType;
-        private Vector3 _lastForce;
-        private Vector3 _lastCenter;
-        private float _lastRadius;
-        private readonly WaitForSeconds _waitForSeconds = new (0.1f);
-        private Coroutine _wait;
-        
+        private          PBDForceType   _lastType;
+        private          Vector3        _lastForce;
+        private          Vector3        _lastCenter;
+        private          float          _lastRadius;
+        private          float          _lastForceRatui;
+        private readonly WaitForSeconds _waitForSeconds = new(0.1f);
+        private          Coroutine      _wait;
+
         //transform内容job直接拿，这些自己加事件监控
         private bool HasValueChanged()
         {
-            return !_lastForce.Equals(m_Force) ||
-                   !_lastCenter .Equals(m_Center) ||
+            return !_lastForce.Equals(m_Force)           ||
+                   !_lastForceRatui.Equals(m_ForceRatio) ||
+                   !_lastCenter.Equals(m_Center)         ||
                    !_lastRadius.Equals(m_Radius);
         }
-        
+
         private bool HasTypeChanged()
         {
             return !_lastType.Equals(m_ForceType);
@@ -42,20 +46,23 @@ namespace UnityEngine.PBD
             while (true)
             {
                 yield return _waitForSeconds;
-                
+
                 if (HasTypeChanged())
                 {
                     OnBeforeTypeChangged();
                     yield return 0;
-                    
+
                     OnAfterTypeChangged();
                 }
+
                 if (HasValueChanged())
                 {
                     OnValueChangged();
-                    _lastForce = m_Force;
+                    _lastForce  = m_Force;
                     _lastCenter = m_Center;
                     _lastRadius = m_Radius;
+
+                    _lastForceRatui = m_ForceRatio;
                 }
             }
         }
@@ -65,7 +72,7 @@ namespace UnityEngine.PBD
             if (Application.isPlaying)
             {
                 Prepare();
-                if (InteractionOfLeavesManager.IsInstance()) 
+                if (InteractionOfLeavesManager.IsInstance())
                     InteractionOfLeavesManager.Instance?.UpdateForceInfo(this);
             }
         }
@@ -87,11 +94,9 @@ namespace UnityEngine.PBD
                 Prepare();
                 InteractionOfLeavesManager.Instance?.RegistForce(this);
             }
-            
         }
 
-        [HideInInspector]
-        public PBDForceField force;
+        [HideInInspector] public PBDForceField force;
 
         private void OnEnable()
         {
@@ -104,20 +109,20 @@ namespace UnityEngine.PBD
         private void OnDisable()
         {
             //..
-            if (InteractionOfLeavesManager.IsInstance()) 
+            if (InteractionOfLeavesManager.IsInstance())
                 InteractionOfLeavesManager.Instance?.UnRegistForce(this);
             StopCoroutine(_wait);
         }
 
         private void OnValidate()
         {
-            if(m_Radius < 0)
+            if (m_Radius < 0)
                 m_Radius = Mathf.Max(m_Radius, 0);
-            
+
             if (m_ForceType == PBDForceType.Viscosity &&
                 (m_Force.x < -1 || m_Force.x > 1 ||
-                m_Force.y < -1 || m_Force.y > 1 ||
-                m_Force.z < -1 || m_Force.z > 1))
+                 m_Force.y < -1 || m_Force.y > 1 ||
+                 m_Force.z < -1 || m_Force.z > 1))
             {
                 m_Force = new Vector3()
                 {
@@ -128,17 +133,16 @@ namespace UnityEngine.PBD
             }
 
             // Prepare();
-
         }
 
         void Prepare()
         {
-            force.ForceType = m_ForceType;
-            force.Force = m_Force;
-            force.Center = m_Center;
-            force.Radius = m_Radius;
-            force.LerpRatio = m_LerpPosRatio;
-            force.DeltaTime = Time.fixedDeltaTime;
+            force.ForceType   = m_ForceType;
+            force.Force       = m_Force * m_ForceRatio;
+            force.Center      = m_Center;
+            force.Radius      = m_Radius;
+            force.LerpRatio   = m_LerpPosRatio;
+            force.DeltaTime   = Time.fixedDeltaTime;
             force.loacl2World = transform.localToWorldMatrix;
             force.Prepare();
         }

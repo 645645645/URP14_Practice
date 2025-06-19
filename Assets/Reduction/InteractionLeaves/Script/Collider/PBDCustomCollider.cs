@@ -1,16 +1,14 @@
-﻿
-using Unity.Mathematics;
+﻿using Unity.Mathematics;
 
 namespace UnityEngine.PBD
 {
     //去掉了无限大平面 做AABB过滤要特别处理
-    
+
     [AddComponentMenu("PBD/PBD Custom Collider")]
     public class PBDCustomCollider : PBDColliderBase
     {
-        
         [_ReadOnlyInPlayMode] public float3 m_Size = new float3(1, 1, 1);
-        
+
         [_ReadOnlyInPlayMode] [Tooltip("The radius of the sphere or capsule.")]
         public float m_Radius = 0.5f;
 
@@ -20,11 +18,14 @@ namespace UnityEngine.PBD
         [_ReadOnlyInPlayMode] [Tooltip("The other radius of the capsule.")]
         public float m_Radius2 = 0.5f;
         
+        // [Min(0)]
+        [_ReadOnlyInPlayMode] 
+        public float m_MoveDiffuseRatio = 1;
+
         private bool hasInitialized = false;
 
-        [HideInInspector]
-        public PBDCustomColliderInfo colliderInfo;
-        
+        [HideInInspector] public PBDCustomColliderInfo colliderInfo;
+
         public PBDCustomColliderInfo PbdCustomCollider => colliderInfo;
 
         protected override void OnEnable()
@@ -33,7 +34,7 @@ namespace UnityEngine.PBD
             Prepare();
             base.OnEnable();
         }
-        
+
         void OnValidate()
         {
             switch (m_ColliderType)
@@ -45,13 +46,14 @@ namespace UnityEngine.PBD
                 case PBDColliderType.Sphere:
                 case PBDColliderType.Capsule:
                 case PBDColliderType.AsymmetricalCapsule:
-                    m_Radius = Mathf.Max(m_Radius, 0);
-                    m_Height = Mathf.Max(m_Height, 0);
+                    m_Radius  = Mathf.Max(m_Radius,  0);
+                    m_Height  = Mathf.Max(m_Height,  0);
                     m_Radius2 = Mathf.Max(m_Radius2, 0);
                     break;
                 default:
                     break;
             }
+
             gameObject.isStatic = m_bStatic;
 
             InitializeBounds();
@@ -62,24 +64,26 @@ namespace UnityEngine.PBD
         {
             if (!hasInitialized)
             {
-                colliderInfo = new PBDCustomColliderInfo();
+                colliderInfo   = new PBDCustomColliderInfo();
                 hasInitialized = true;
             }
+            colliderInfo._lastFramePosition.w = m_MoveDiffuseRatio;
 
-            colliderInfo.CollideType = m_ColliderType;
-            colliderInfo.bStatic = m_bStatic;
+            colliderInfo.CollideType     = m_ColliderType;
+            colliderInfo.bStatic         = m_bStatic;
             colliderInfo.useConcatNormal = m_bStick;
-            colliderInfo.Center = m_Center;
-            colliderInfo.Position = transform.position;
-            colliderInfo.Rotation = transform.rotation;
+            colliderInfo.Center          = m_Center;
+            colliderInfo.Position        = transform.position;
+            colliderInfo.Rotation        = transform.rotation;
+
             switch (m_ColliderType)
             {
                 case PBDColliderType.Plane:
-                    colliderInfo.Size = m_Size;
+                    colliderInfo.Size  = m_Size;
                     colliderInfo.Scale = transform.lossyScale;
-                    var bounds = _lastBound;
-                    float3 size = bounds.size;
-                    bool3 isZero = size.xyz < 1e-3f;
+                    var    bounds = _lastBound;
+                    float3 size   = bounds.size;
+                    bool3  isZero = size.xyz < 1e-3f;
 
                     int zeroCount = math.countbits((uint)MathematicsUtil.bitmask(new bool3(isZero)));
                     if (zeroCount != 1)
@@ -88,21 +92,22 @@ namespace UnityEngine.PBD
                         colliderInfo.boundsMax = _lastBound.max;
                         break;
                     }
+
                     uint zeroMask = (uint)MathematicsUtil.bitmask(isZero);
                     float3 up = math.select(0f, 1f, new bool3(
-                        (zeroMask & 1) != 0,
-                        (zeroMask & 2) != 0,
-                        (zeroMask & 4) != 0
-                    ));
-                    size = m_Size + up * 2;
-                    bounds.size = size;
+                                                (zeroMask & 1) != 0,
+                                                (zeroMask & 2) != 0,
+                                                (zeroMask & 4) != 0
+                                            ));
+                    size                   = m_Size + up * 2;
+                    bounds.size            = size;
                     colliderInfo.boundsMin = bounds.min;
                     colliderInfo.boundsMax = bounds.max;
-                    _lastBound = bounds;
+                    _lastBound             = bounds;
                     break;
                 case PBDColliderType.Box:
-                    colliderInfo.Size = m_Size;
-                    colliderInfo.Scale = transform.lossyScale;
+                    colliderInfo.Size      = m_Size;
+                    colliderInfo.Scale     = transform.lossyScale;
                     colliderInfo.boundsMin = _lastBound.min;
                     colliderInfo.boundsMax = _lastBound.max;
                     break;
@@ -111,9 +116,9 @@ namespace UnityEngine.PBD
                 case PBDColliderType.AsymmetricalCapsule:
                     colliderInfo.Size = new float3(m_Height, m_Radius, m_Radius2);
                     float4 scale = colliderInfo.ScaleSize;
-                    scale.x = transform.lossyScale.x;
+                    scale.x                = transform.lossyScale.x;
                     colliderInfo.ScaleSize = scale;
-                    
+
                     colliderInfo.boundsMin = _lastBound.min;
                     colliderInfo.boundsMax = _lastBound.max;
                     break;
@@ -129,9 +134,9 @@ namespace UnityEngine.PBD
             // base.OnDrawGizmosSelected();
 
             Prepare();
-            
+
             DrawAABB(in colliderInfo.boundsMin, in colliderInfo.boundsMax);
-            
+
             Gizmos.color = Color.yellow;
             switch (m_ColliderType)
             {
@@ -161,9 +166,9 @@ namespace UnityEngine.PBD
                 extend = (max - min) * 0.5f;
             float3
                 ex1 = new float3(-1, -1, -1) * extend,
-                ex2 = new float3(-1, 1, -1) * extend,
-                ex3 = new float3(1, 1, -1) * extend,
-                ex4 = new float3(1, -1, -1) * extend;
+                ex2 = new float3(-1, 1,  -1) * extend,
+                ex3 = new float3(1,  1,  -1) * extend,
+                ex4 = new float3(1,  -1, -1) * extend;
 
             float3
                 a = center + ex1,
@@ -189,7 +194,7 @@ namespace UnityEngine.PBD
             Gizmos.DrawLine(c, g);
             Gizmos.DrawLine(d, h);
         }
-        
+
         private void DrawPlane(in float3 center, in float3 up)
         {
             Gizmos.DrawLine(center, center + up);
@@ -197,18 +202,18 @@ namespace UnityEngine.PBD
 
         private void DrawCube(in float3 size, in float3 pos, in quaternion rot, in float3 scale)
         {
-            float3 extent = size * 0.5f;
-            float4x4 trs = float4x4.TRS(pos, rot, scale);
-            float3 ex1 = new float3(-1, -1, -1) * extent;
-            float3 ex2 = new float3(-1, 1, -1) * extent;
-            float3 ex3 = new float3(1, 1, -1) * extent;
-            float3 ex4 = new float3(1, -1, -1) * extent;
+            float3   extent = size * 0.5f;
+            float4x4 trs    = float4x4.TRS(pos, rot, scale);
+            float3   ex1    = new float3(-1, -1, -1) * extent;
+            float3   ex2    = new float3(-1, 1,  -1) * extent;
+            float3   ex3    = new float3(1,  1,  -1) * extent;
+            float3   ex4    = new float3(1,  -1, -1) * extent;
 
             float3
-                a = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(ex1, 1)),
-                b = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(ex2, 1)),
-                c = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(ex3, 1)),
-                d = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(ex4, 1)),
+                a = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(ex1,  1)),
+                b = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(ex2,  1)),
+                c = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(ex3,  1)),
+                d = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(ex4,  1)),
                 e = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(-ex3, 1)),
                 f = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(-ex4, 1)),
                 g = MathematicsUtil.MatrixMultiplyPoint3x4(trs, new float4(-ex1, 1)),
