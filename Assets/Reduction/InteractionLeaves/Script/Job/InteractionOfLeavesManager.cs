@@ -1221,7 +1221,9 @@ namespace UnityEngine.PBD
                         Elasticity               = properties.m_Elasticity,
                         cellRadius               = properties.rigiVoxelSize,
                         bucketCapacityMask       = properties.RigiVoxelBucketMask,
+#if UNITY_EDITOR
                         DebugArray               = debugDrawer.__HitArray,
+#endif
                     };
 
                     dep = rigiCollisionJob.ScheduleByRef(m_updateCount, m_updateQuadBatchCount, dep);
@@ -1659,19 +1661,17 @@ namespace UnityEngine.PBD
             
             if (m_updateCount > 0)
             {
-
-                var prepareReadForceJobHandle = PreparReadForce(_lastJobHandle, deltaTime); //延迟一帧生效 不care
+                var prepareReadForceJobHandle = PreparReadForce(_lastJobHandle, deltaTime);
 
                 var prepareReadHandle = PrepareReadCollider(_lastJobHandle, deltaTime);
                 
                 if(m_windField.IsCreated && properties.extForceMode == ExtForceMode.WindField)
                 {
+                    var canWriteToFront = JobHandle.CombineDependencies(prepareReadForceJobHandle, prepareReadHandle);
                     
                     m_windField.UpdateFieldParams(deltaTime);
-
-                    var canWriteToFront = JobHandle.CombineDependencies(prepareReadForceJobHandle, prepareReadHandle);
                             
-                    var windSimlateJobHandle = m_windField.OptimizedSimlate(_lastJobHandle, deltaTime);
+                    var windSimlateJobHandle = m_windField.SimulateParallel(_lastJobHandle, deltaTime);
                 
                     var writeSoureceJobhandle = m_windField.WriteToFrontBuffer(canWriteToFront, ref nativeData.m_forceFields, ref nativeData.m_rigibodyColliders);
                     

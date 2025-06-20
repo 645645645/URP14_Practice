@@ -13,9 +13,16 @@ namespace UnityEngine.PBD
     {
         LineSequence,
         LineSlidingWindow,
+        RBGSeidel,
+    }
+
+    public enum ParallelUnit
+    {
+        Line,
+        IJob,
     }
     
-    public unsafe class WindField : MonoBehaviour
+    public class WindField : MonoBehaviour
     {
         
         // 边缘留一格
@@ -40,8 +47,6 @@ namespace UnityEngine.PBD
         public int NSize => N.x * N.y * N.z;
         
         public int IteratorX => N.x;
-        public int IteratorZ => N.z;
-        public int IteratorY => N.y;
 
         public int3 Dim     => dimensions;
         public int3 PublicN => N;
@@ -73,7 +78,15 @@ namespace UnityEngine.PBD
 
         private JobHandle _simlateJobHandle = default;
 
-        public void Initialize(int3      dims,      float        diffusion, float viscosity,
+        private AdvectVelocityJob  _advectVelocityJob;
+        private DivergenceJob      _divergenceJob;
+        private PressureJob        _pressureJob;
+        private CorrectVelocityJob _correctVelocityJob;
+
+        private WriteDensityFieldJob  _writeDentsityJob;
+        private WriteVelocityFieldJob _wirteVelocityJob;
+        
+        public void Initialize(int3      dims,
                                Allocator allocator, in Transform center = null)
         {
             bool3 noPower2 = !math.ispow2(dims);
@@ -95,7 +108,7 @@ namespace UnityEngine.PBD
             VelocityY    = new DoubleBuffer(dims, allocator,BoundaryType.VelocityY);
             VelocityZ    = new DoubleBuffer(dims, allocator,BoundaryType.VelocityZ);
 
-            int length = dimensions.x * dimensions.y * dimensions.z;
+            int length = dims.x * dims.y * dims.z;
             
             exchange_Density   = new WindFiledExchangeBuffer(length, allocator);
             exchange_VelocityX = new WindFiledExchangeBuffer(length, allocator);
@@ -105,6 +118,22 @@ namespace UnityEngine.PBD
             m_windFieldCenter = center ? center : transform;
 
             m_lasFramePosition = m_windFieldCenter.position;
+
+            int4 stride = GridUtils.GetStride(dims);
+
+            _advectVelocityJob = new AdvectVelocityJob() { 
+                dim      = dims, 
+                N        = N,
+                stride   = stride,
+                maxRange = (float3)dims - 0.5f 
+            };
+
+            _divergenceJob      = new DivergenceJob() { dim      = dims, N = N, stride = stride };
+            _pressureJob        = new PressureJob() { dim        = dims, N = N, stride = stride };
+            _correctVelocityJob = new CorrectVelocityJob() { dim = dims, N = N, stride = stride };
+
+            _writeDentsityJob = new WriteDensityFieldJob() { dim  = dims, N = N };
+            _wirteVelocityJob = new WriteVelocityFieldJob() { dim = dims, N = N };
         }
 
         public void Dispose()
@@ -113,13 +142,10 @@ namespace UnityEngine.PBD
             VelocityX.Dispose();
             VelocityY.Dispose();
             VelocityZ.Dispose();
-            if (IsCreated)
-            {
-                exchange_Density.Dispose();
-                exchange_VelocityX.Dispose();
-                exchange_VelocityY.Dispose();
-                exchange_VelocityZ.Dispose();
-            }
+            exchange_Density.Dispose();
+            exchange_VelocityX.Dispose();
+            exchange_VelocityY.Dispose();
+            exchange_VelocityZ.Dispose();
         }
 
         public void UpdateFieldParams(float deltaTime)
@@ -151,48 +177,71 @@ namespace UnityEngine.PBD
         {
             if (IsCreated)
             {
-                var writeDentsityJob = new WriteDensityFieldJob() { dim = dimensions, N = N };
-                writeDentsityJob.UpdateParams(ref exchange_Density.front, in m_windFieldOri, ref colliders);
-                
-                var wirteVekocityJob = new WriteVelocityFieldJob() { dim = dimensions, N = N };
-                wirteVekocityJob.UpdateParams(ref exchange_VelocityX.front, ref exchange_VelocityY.front, ref exchange_VelocityZ.front,
-                                              in m_windFieldOri, ref forceFields);
 
+                _wirteVelocityJob.UpdateParams(ref exchange_VelocityX.front, ref exchange_VelocityY.front, ref exchange_VelocityZ.front,
+                                               in m_windFieldOri, ref forceFields);
+                if (useDensityField)
+                {
+                    _writeDentsityJob.UpdateParams(ref exchange_Density.front, in m_windFieldOri, ref colliders);
 
-                dep = JobHandle.CombineDependencies(writeDentsityJob.ScheduleByRef(Length, dimensions.x, dep),
-                                                    wirteVekocityJob.ScheduleByRef(Length, dimensions.x, dep));
+                    dep = parallelUnit switch
+                          {
+                              ParallelUnit.Line => JobHandle.CombineDependencies(_writeDentsityJob.ScheduleByRef(Length, dimensions.x, dep),
+                                                                                 _wirteVelocityJob.ScheduleByRef(Length, dimensions.x, dep)),
+                              // ParallelUnit.IJob
+                              _ => JobHandle.CombineDependencies(_writeDentsityJob.ScheduleByRef(dep),
+                                                                 _wirteVelocityJob.ScheduleByRef(dep)),
+                          };
+                }
+                else
+                {
+                    dep = parallelUnit switch
+                          {
+                              ParallelUnit.Line => _wirteVelocityJob.ScheduleByRef(Length, dimensions.x, dep),
+                              // ParallelUnit.IJob
+                              _ => _wirteVelocityJob.ScheduleByRef(dep),
+                          };
+                }
             }
 
             return dep;
         }
         
         [GenerateTestsForBurstCompatibility]
-        public JobHandle Simulate(JobHandle dep, float deltaTime)
+        public JobHandle SimulateParallel(JobHandle dep, float deltaTime)
         {
             if (IsCreated)
             {
-                dep = VelocityStep(dep, deltaTime);
-                dep = DensityStep(dep, deltaTime);
+                dep = VelocityStepParallel(dep, deltaTime);
+                if(useDensityField)
+                    dep = DensityStepParallel(dep, deltaTime);
             }
             return dep;
         }
 
         [GenerateTestsForBurstCompatibility]
-        public JobHandle OptimizedSimlate(JobHandle dep, float deltaTime)
+        public JobHandle OptimizedSimulateParallel(JobHandle dep, float deltaTime)
         {
             if (IsCreated)
             {
-                dep = VelocityStep(dep, deltaTime);
-                
-                var densityDiffuse = DensityField.AddSource(dep, ref exchange_Density.front, deltaTime);
+                var velocityStep = VelocityStepParallel(dep, deltaTime);
 
-                densityDiffuse = DensityField.Diffuse(densityDiffuse, diffusion, deltaTime, iterationsCountPreFrame, convolutionMethod);
-                
-                dep = JobHandle.CombineDependencies(dep, densityDiffuse);
-                
-                //密度平流之前的部分不需要等速度迭代完
-                DensityField.Swap();
-                dep = DensityField.Advect(dep, ref VelocityX.back, ref VelocityY.back, ref VelocityZ.back, deltaTime);
+                if (useDensityField)
+                {
+                    var densityDiffuse = DensityField.AddSource(dep, ref exchange_Density.front, deltaTime, parallelUnit);
+
+                    densityDiffuse = DensityField.Diffuse(densityDiffuse, diffusion, deltaTime, iterationsCountPreFrame,
+                                                          parallelUnit, convolutionMethod);
+
+                    dep = JobHandle.CombineDependencies(velocityStep, densityDiffuse);
+
+                    //密度平流之前的部分不需要等速度迭代完
+                    dep = DensityField.Advect(dep, ref VelocityX.back, ref VelocityY.back, ref VelocityZ.back, deltaTime, parallelUnit);
+                }
+                else
+                {
+                    dep = velocityStep;
+                }
             }
 
             return dep;
@@ -200,42 +249,47 @@ namespace UnityEngine.PBD
 
         public JobHandle SaveToBack(JobHandle dep)
         {
-            dep = JobHandle.CombineDependencies(VelocityX.Save(dep, ref exchange_VelocityX.back),
-                                                VelocityY.Save(dep, ref exchange_VelocityY.back),
-                                                VelocityZ.Save(dep, ref exchange_VelocityZ.back));
-            
-            dep = DensityField.Save(dep, ref exchange_Density.back);
+            _simlateJobHandle = JobHandle.CombineDependencies(VelocityX.Save(dep, ref exchange_VelocityX.back),
+                                                              VelocityY.Save(dep, ref exchange_VelocityY.back),
+                                                              VelocityZ.Save(dep, ref exchange_VelocityZ.back));
+            if (useDensityField)
+            {
+                dep = DensityField.Save(dep, ref exchange_Density.back);
 
-            _simlateJobHandle = JobHandle.CombineDependencies(_simlateJobHandle, dep);
+                _simlateJobHandle = JobHandle.CombineDependencies(_simlateJobHandle, dep);
+            }
 
             return _simlateJobHandle;
         }
         
 
         [GenerateTestsForBurstCompatibility]
-        private JobHandle DensityStep(JobHandle dep, float deltaTime)
+        private JobHandle DensityStepParallel(JobHandle dep, float deltaTime)
         {
-            dep = DensityField.AddSource(dep, ref exchange_Density.front, deltaTime);
+            dep = DensityField.AddSource(dep, ref exchange_Density.front, deltaTime, parallelUnit);
 
-            dep = DensityField.Diffuse(dep, diffusion, deltaTime, iterationsCountPreFrame, convolutionMethod);
+            dep = DensityField.Diffuse(dep, diffusion, deltaTime, iterationsCountPreFrame,
+                                       parallelUnit, convolutionMethod);
             
-            DensityField.Swap();
-            dep = DensityField.Advect(dep, ref VelocityX.back, ref VelocityY.back, ref VelocityZ.back, deltaTime);
+            dep = DensityField.Advect(dep, ref VelocityX.back, ref VelocityY.back, ref VelocityZ.back, deltaTime, parallelUnit);
 
             
             return dep;
         }
 
         [GenerateTestsForBurstCompatibility]
-        private JobHandle VelocityStep(JobHandle dep, float deltaTime)
+        private JobHandle VelocityStepParallel(JobHandle dep, float deltaTime)
         {
-            var addSourceX = VelocityX.AddSource(dep, ref exchange_VelocityX.front, deltaTime);
-            var addSourceY = VelocityY.AddSource(dep, ref exchange_VelocityY.front, deltaTime);
-            var addSourceZ = VelocityZ.AddSource(dep, ref exchange_VelocityZ.front, deltaTime);
-            
-            var diffuseXJobHandle = VelocityX.Diffuse(addSourceX, vicosity, deltaTime, iterationsCountPreFrame, convolutionMethod);
-            var diffuseYJobHandle = VelocityY.Diffuse(addSourceY, vicosity, deltaTime, iterationsCountPreFrame, convolutionMethod);
-            var diffuseZJobHandle = VelocityZ.Diffuse(addSourceZ, vicosity, deltaTime, iterationsCountPreFrame, convolutionMethod);
+            var addSourceX = VelocityX.AddSource(dep, ref exchange_VelocityX.front, deltaTime, parallelUnit);
+            var addSourceY = VelocityY.AddSource(dep, ref exchange_VelocityY.front, deltaTime, parallelUnit);
+            var addSourceZ = VelocityZ.AddSource(dep, ref exchange_VelocityZ.front, deltaTime, parallelUnit);
+
+            var diffuseXJobHandle = VelocityX.Diffuse(addSourceX, vicosity, deltaTime, iterationsCountPreFrame,
+                                                      parallelUnit, convolutionMethod);
+            var diffuseYJobHandle = VelocityY.Diffuse(addSourceY, vicosity, deltaTime, iterationsCountPreFrame,
+                                                      parallelUnit, convolutionMethod);
+            var diffuseZJobHandle = VelocityZ.Diffuse(addSourceZ, vicosity, deltaTime, iterationsCountPreFrame,
+                                                      parallelUnit, convolutionMethod);
 
             // dep = JobHandle.CombineDependencies(addSourceX, addSourceY, addSourceZ);
             
@@ -246,13 +300,22 @@ namespace UnityEngine.PBD
             
             
             VelocityX.Swap(); VelocityY.Swap(); VelocityZ.Swap();
-            var advectXJobHandle = VelocityX.Advect(dep, ref VelocityX.front, ref VelocityY.front, ref VelocityZ.front, deltaTime);
-            var advectYJobHandle = VelocityY.Advect(dep, ref VelocityX.front, ref VelocityY.front, ref VelocityZ.front, deltaTime);
-            var advectZJobHandle = VelocityZ.Advect(dep, ref VelocityX.front, ref VelocityY.front, ref VelocityZ.front, deltaTime);
-            
-            dep = JobHandle.CombineDependencies(advectXJobHandle, advectYJobHandle, advectZJobHandle);
-            
-            
+
+            _advectVelocityJob.UpdateParams(ref VelocityX.back, ref VelocityY.back, ref VelocityZ.back,
+                                            ref VelocityX.front, ref VelocityY.front, ref VelocityZ.front, deltaTime);
+
+            if (parallelUnit == ParallelUnit.Line)
+            {
+                dep = _advectVelocityJob.ScheduleByRef(NSize, IteratorX, dep);
+                dep = JobHandle.CombineDependencies(VelocityX.SetBoundaryClampBack(dep),
+                                                    VelocityY.SetBoundaryClampBack(dep),
+                                                    VelocityZ.SetBoundaryClampBack(dep));
+            }
+            else
+            {
+                dep = _advectVelocityJob.ScheduleByRef(dep);
+            }
+
             dep = VelocityProject(dep, iterationsCountPreFrame);
             
             return dep;
@@ -261,49 +324,62 @@ namespace UnityEngine.PBD
         [GenerateTestsForBurstCompatibility]
         JobHandle VelocityProject(JobHandle dep, int iterateCount = 10)
         {
-            //divergence
             ref NativeArray<float> pressure   = ref VelocityX.front,//
                        divergence = ref VelocityZ.front;
             
-            var _divergenceJob = new DivergenceJob() { dim = dimensions, N = N, };
             
             _divergenceJob.UpdateParams(ref pressure, ref divergence,
                                         ref VelocityX.back, ref VelocityY.back, ref VelocityZ.back);
 
-            var divergenceJobHandle = _divergenceJob.ScheduleByRef(NSize, IteratorX, dep);
-            var setBndDivJobHandle  = VelocityX.SetBoundaryClamp(divergenceJobHandle, ref pressure, 0);
-            var setBndPJobHandle    = VelocityY.SetBoundaryClamp(divergenceJobHandle, ref divergence, 0);
-            
-            dep = JobHandle.CombineDependencies(setBndDivJobHandle, setBndPJobHandle);
-            
-            
-            //pressure
-            var _pressureJob = new PressureJob(){ dim = dimensions, N = N, };
-            
-            _pressureJob.UpdateParams(ref pressure, ref divergence);
-
-            for (int i = 0; i < iterateCount; i++)
-            {
-                dep = _pressureJob.ScheduleByRef(NSize, IteratorX, dep);
-                dep = VelocityX.SetBoundaryClamp(dep, ref pressure, 0);
-            }
-            
-            //update Velocity
-            var _correctVelocityJob = new CorrectVelocityJob(){ dim = dimensions, N = N, };
+            _pressureJob.UpdateParams(ref pressure, ref divergence, iterateCount);
             
             _correctVelocityJob.UpdateParams(ref pressure, ref VelocityX.back, ref VelocityY.back, ref VelocityZ.back);
-            dep = _correctVelocityJob.ScheduleByRef(NSize, IteratorX ,dep);
+            
+            if (parallelUnit == ParallelUnit.Line)
+            {
+                //divergence
+                var divergenceJobHandle = _divergenceJob.ScheduleByRef(NSize, IteratorX, dep);
+                var setBndDivJobHandle  = VelocityX.SetBoundaryClamp(divergenceJobHandle, ref pressure, 0);
+                var setBndPJobHandle    = VelocityY.SetBoundaryClamp(divergenceJobHandle, ref divergence, 0);
 
-            return JobHandle.CombineDependencies(VelocityX.SetBoundaryClampBack(dep),
-                                                 VelocityY.SetBoundaryClampBack(dep),
-                                                 VelocityZ.SetBoundaryClampBack(dep));
+                dep = JobHandle.CombineDependencies(setBndDivJobHandle, setBndPJobHandle);
+                
+                //pressure
+                for (int i = 0; i < iterateCount; i++)
+                {
+                    _pressureJob.IsRedPhase = true;
+
+                    dep = _pressureJob.ScheduleByRef(NSize, IteratorX, dep);
+                
+                
+                    _pressureJob.IsRedPhase = false;
+
+                    dep = _pressureJob.ScheduleByRef(NSize, IteratorX, dep);
+                
+                    dep = VelocityX.SetBoundaryClamp(dep, ref pressure, 0);
+                }
+                
+                //update Velocity
+                dep = _correctVelocityJob.ScheduleByRef(NSize, IteratorX, dep);
+
+                dep = JobHandle.CombineDependencies(VelocityX.SetBoundaryClampBack(dep),
+                                                    VelocityY.SetBoundaryClampBack(dep),
+                                                    VelocityZ.SetBoundaryClampBack(dep));
+            }
+            else
+            {
+                dep = _divergenceJob.ScheduleByRef(dep);
+                dep = _pressureJob.ScheduleByRef(dep);
+                dep = _correctVelocityJob.ScheduleByRef(dep);
+            }
+
+            return dep;
         }
 
 
         private void Start()
         {
-            Initialize(gridSize, diffusion, vicosity, Allocator.Persistent,
-                       windFieldCenter);
+            Initialize(gridSize, Allocator.Persistent, windFieldCenter);
         }
 
 
@@ -325,8 +401,14 @@ namespace UnityEngine.PBD
         
         public  Vector3 centerOffset = new Vector3(0.5f, 0.5f, 0.5f);
 
+        public ParallelUnit parallelUnit = ParallelUnit.Line;
+
         public ConvolutionMethod convolutionMethod = ConvolutionMethod.LineSequence;
+
+        public bool useDensityField = false;
         
+
+#if UNITY_EDITOR
         public bool drawPos;
 
         public bool drawDir;
@@ -339,8 +421,6 @@ namespace UnityEngine.PBD
             if(Application.isPlaying && IsCreated)
                 DrawWindField( dimensions);
         }
-
-#if UNITY_EDITOR
 
         public void DrawWindField(int3 size)
         {

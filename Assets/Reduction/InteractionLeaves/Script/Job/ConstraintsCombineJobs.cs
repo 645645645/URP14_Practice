@@ -854,13 +854,13 @@ namespace UnityEngine.PBD
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<QuadInvMass>.ReadOnly QuadInvMasses;
 
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<float>.ReadOnly WindFieldX;
         
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<float>.ReadOnly WindFieldY;
         
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<float>.ReadOnly WindFieldZ;
 
         [WriteOnly, NativeDisableParallelForRestriction]

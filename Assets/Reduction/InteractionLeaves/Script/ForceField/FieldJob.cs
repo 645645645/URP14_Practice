@@ -7,18 +7,28 @@ using Unity.Mathematics;
 
 namespace UnityEngine.PBD
 {
-    [BurstCompile(FloatPrecision.Low, FloatMode.Default)]
-    internal unsafe struct AddSourceJob : IJobParallelForBatch
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
+                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
+                  /*Debug = true,*/
+                  DisableSafetyChecks = true)]
+    internal unsafe struct AddSourceJob : IJobParallelForBatch, IJob
     {
-        [NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [NativeDisableParallelForRestriction]
         private NativeArray<float> Back;
 
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction]
         private NativeArray<float>.ReadOnly Source;
 
         [ReadOnly] private float deltaTime;
-        
-        [ReadOnly] private bool stopNan;
+
+        public void Execute()
+        {
+            var srcPtr  = (float*)Source.GetUnsafeReadOnlyPtr();
+            var destPtr = (float*)Back.GetUnsafePtr();
+
+            for (int i = 0; i < Back.Length; i++)
+                destPtr[i] += srcPtr[i] * deltaTime;
+        }
 
         public void Execute(int startIndex, int count)
         {
@@ -39,36 +49,183 @@ namespace UnityEngine.PBD
         }
     }
     
-    //如果接受足够多的随机混合成的"稳定" 是可以转高斯-塞德尔方式的
-    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
+    //如果接受足够多的随机混合的"稳定" 是可以转高斯-塞德尔方式的
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
                   FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
                   /*Debug = true,*/
                   DisableSafetyChecks = true)]
-    internal unsafe struct DiffuseXJob : IJobParallelForBatch, IJob
+    internal unsafe struct DiffuseLineJob : IJobParallelForBatch, IJob
     {
-        [NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [NativeDisableParallelForRestriction]
         private NativeArray<float> Back;
 
-        [ReadOnly, NativeDisableUnsafePtrRestriction]
+        [ReadOnly]
         private NativeArray<float>.ReadOnly Front;
 
         [ReadOnly] public int3 dim;
         [ReadOnly] public int3 N;
+        [ReadOnly] public int4  stride;
+        [ReadOnly] public int  iterateDirection;
 
-        [ReadOnly] private float diffusion; //[0,1]
-        [ReadOnly] private float deltaTime;
+        // [ReadOnly] private float diffusion; //[0,1]
+        // [ReadOnly] private float deltaTime;
 
         [ReadOnly] private ConvolutionMethod convolutionMethod;
 
         [ReadOnly] private float2 divAndAbsorption;//预计算
 
+        [ReadOnly] private int iterateCount;
+
+        [ReadOnly] private int b;
+
         public void Execute()
         {
             (float div, float absorption) = (divAndAbsorption.x, divAndAbsorption.y);
+
+            var srcPtr  = (float*)Front.GetUnsafeReadOnlyPtr();
+            var destPtr = (float*)Back.GetUnsafePtr();
             
+            //
+            switch (convolutionMethod)
+            {
+                case ConvolutionMethod.LineSequence:
+                    for (int k = 0; k < iterateCount; k++)
+                    {
+                        for (int y = 1; y <= N.y; y++)
+                        {
+                            for (int z = 1; z <= N.z; z++)
+                            {
+                                int index = GridUtils.GetIndex(1, y, z, dim);
+                                
+                                for (int i = 1; i <= N.x; i++)
+                                {
+                                    destPtr[index] = srcPtr[index] * div +
+                                                     (destPtr[index - stride.x] +
+                                                      destPtr[index + stride.x]) * absorption;
+                                    
+                                    index += stride.x;
+                                }
+                            }
+                        }
+                
+                        for (int y = 1; y <= N.y; y++)
+                        {
+                            for (int x = 1; x <= N.x; x++)
+                            {
+                                int index = GridUtils.GetIndex(x, y, 1, dim);
+                                for (int i = 1; i <= N.z; i++)
+                                {
+                                    destPtr[index] = srcPtr[index] * div +
+                                                     (destPtr[index - stride.z] +
+                                                      destPtr[index + stride.z]) * absorption;
+                                    
+                                    index += stride.z;
+                                }
+                            }
+                        }
+                
+                        for (int z = 1; z <= N.y; z++)
+                        {
+                            for (int x = 1; x <= N.x; x++)
+                            {
+                                int index = GridUtils.GetIndex(x, 1, z, dim);
+                                
+                                for (int i = 1; i <= N.y; i++)
+                                {
+                                    destPtr[index] = srcPtr[index] * div +
+                                                     (destPtr[index - stride.y] +
+                                                      destPtr[index + stride.y]) * absorption;
+                                    
+                                    index += stride.y;
+                                }
+                            }
+                        }
+                        
+                        //set_bnt
+
+                        GridUtils.SetBoundary(ref destPtr, b, in stride, in N, in dim);
+                    }
+                    break;
+                
+                case ConvolutionMethod.LineSlidingWindow:
+                    for (int k = 0; k < iterateCount; k++)
+                    {
+                        for (int y = 1; y <= N.y; y++)
+                        {
+                            for (int z = 1; z <= N.z; z++)
+                            {
+                                int index = GridUtils.GetIndex(1, y, z, dim);
+                                
+                                float left = destPtr[index - stride.x],
+                                      mid  = destPtr[index], 
+                                      right;
+
+                                for (int i = 1; i <= N.x; i++)
+                                {
+                                    right = destPtr[index + stride.x];
+                                    
+                                    destPtr[index] = srcPtr[index] * div + (left + right) * absorption;
+
+                                    (left, mid) = (mid, right);
+
+                                    index += stride.x;
+                                }
+                            }
+                        }
+                
+                        for (int y = 1; y <= N.y; y++)
+                        {
+                            for (int x = 1; x <= N.x; x++)
+                            {
+                                int index = GridUtils.GetIndex(x, y, 1, dim);
+                                
+                                float left = destPtr[index - stride.z],
+                                      mid  = destPtr[index], 
+                                      right;
+                        
+                                for (int i = 1; i <= N.z; i++)
+                                {
+                                    right = destPtr[index + stride.z];
+                                    
+                                    destPtr[index] = srcPtr[index] * div + (left + right) * absorption;
+                        
+                                    (left, mid) = (mid, right);
+                        
+                                    index += stride.z;
+                                }
+                            }
+                        }
+
+                        for (int z = 1; z <= N.y; z++)
+                        {
+                            for (int x = 1; x <= N.x; x++)
+                            {
+                                int index = GridUtils.GetIndex(x, 1, z, dim);
+
+                                float left = destPtr[index - stride.y],
+                                      mid  = destPtr[index],
+                                      right;
+
+                                for (int i = 1; i <= N.y; i++)
+                                {
+                                    right = destPtr[index + stride.y];
+
+                                    destPtr[index] = srcPtr[index] * div + (left + right) * absorption;
+
+                                    (left, mid) = (mid, right);
+
+                                    index += stride.y;
+                                }
+                            }
+                        }
+                        //set_bnt
+                        GridUtils.SetBoundary(ref destPtr, b, in stride, in N, in dim);
+                    }
+                    break;
+            }
         }
 
-        //输入范围[0，dim-2]即[0, N],需要在三个方向映射偏移一步
+        //输入范围[0，dim-2]即[0, N],需要在三个方向偏移一步
         public void Execute(int startIndex, int count)
         {
             // float a = deltaTime * diffusion * (N.x * N.y * N.z);
@@ -78,13 +235,41 @@ namespace UnityEngine.PBD
             
             (float div, float absorption) = (divAndAbsorption.x, divAndAbsorption.y);
 
-            int yz = startIndex / count;
-            int z  = yz         % N.z;
-            int y  = yz         / N.z;
-            
-            int3 pos   = new int3(0, y, z);
+            int3 headPos;
+            switch (iterateDirection)
+            {
+                case 0: //x
+                {
+                    int yz = startIndex / count;
+                    int z  = yz         % N.z;
+                    int y  = yz         / N.z;
 
-            int  index = GridUtils.GetIndex(pos + 1, dim);
+                    headPos = new int3(0, y, z);
+                }
+                    break;
+                case 1: //y
+                {
+                    int xz = startIndex / count;
+
+                    int x = xz % N.x,
+                        z = xz / N.x;
+
+                    headPos = new int3(x, 0 ,z);
+                }
+                    break;
+                case 2: //z
+                default:
+                {
+                    int xy = startIndex / count;
+                    int x  = xy         % N.x;
+                    int y  = xy         / N.x;
+            
+                    headPos = new int3(x, y, 0);
+                }
+                    break;
+            }
+
+            int  index = GridUtils.GetIndex(headPos + 1, dim);
 
             var srcPtr  = (float*)Front.GetUnsafeReadOnlyPtr();
             var destPtr = (float*)Back.GetUnsafePtr();
@@ -97,8 +282,8 @@ namespace UnityEngine.PBD
                     {
                         
                         destPtr[index] = srcPtr[index] * div +
-                                         (destPtr[index - 1] +
-                                          destPtr[index + 1]) * absorption;
+                                         (destPtr[index - stride[iterateDirection]] +
+                                          destPtr[index + stride[iterateDirection]]) * absorption;
                     
                         index++;
                     }
@@ -106,13 +291,13 @@ namespace UnityEngine.PBD
                 
                 case ConvolutionMethod.LineSlidingWindow:
 
-                    float left = destPtr[index - 1],
+                    float left = destPtr[index - stride[iterateDirection]],
                           mid  = destPtr[index], 
                           right;
 
                     for (int i = 0; i < count; i++)
                     {
-                        right = destPtr[index + 1];
+                        right = destPtr[index + stride[iterateDirection]];
 
                         destPtr[index] = srcPtr[index] * div + (left + right) * absorption;
 
@@ -124,209 +309,162 @@ namespace UnityEngine.PBD
             }
         }
 
-        public void UpdateParams(ref NativeArray<float> back, ref NativeArray<float> front, 
-                                 float      diff, float      deltaTime, 
-                                 float2     divAndAbsorption, 
-                                 ConvolutionMethod convolution)
+        public void UpdateParams(ref NativeArray<float> back,             ref NativeArray<float> front,
+                                 float2                 divAndAbsorption, ConvolutionMethod      convolution,
+                                 int                    iterateCount = 1, int b = 0)
         {
-            Back                  = back;
-            Front                 = front.AsReadOnly();
-            diffusion             = diff;
-            this.deltaTime        = deltaTime;
-            this.divAndAbsorption = divAndAbsorption;
-            convolutionMethod     = convolution;
+            Back                   = back;
+            Front                  = front.AsReadOnly();
+            this.divAndAbsorption  = divAndAbsorption;
+            this.convolutionMethod = convolution;
+            this.iterateCount      = iterateCount;
+            this.b                 = b;
         }
     }
+
     
-    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
                   FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
                   /*Debug = true,*/
                   DisableSafetyChecks = true)]
-    internal unsafe struct DiffuseYJob : IJobParallelForBatch
+    internal unsafe struct DiffuseRBGSJob : IJobParallelForBatch, IJob
     {
-        [NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [NativeDisableParallelForRestriction]
         private NativeArray<float> Back;
 
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [ReadOnly]
         private NativeArray<float>.ReadOnly Front;
 
         [ReadOnly] public int3 dim;
         [ReadOnly] public int3 N;
-
-        [ReadOnly] private float  diffusion; //[0,1]
-        [ReadOnly] private float  deltaTime;
-
-        [ReadOnly] private ConvolutionMethod convolutionMethod;
+        [ReadOnly] public int4 stride;
         
         [ReadOnly] private float2 divAndAbsorption;
 
-        public void Execute(int startIndex, int count)
-        {
-            // float a = deltaTime * diffusion * (N.x * N.y * N.z);
-            //
-            // float div        = 1 / (1 + 2 * a);
-            // float absorption = a * div;
+        [ReadOnly] private int iterateCount;
 
+        [ReadOnly] private int  b;
+        
+        [ReadOnly] public  bool IsRedPhase; // 当前是红点还是黑点阶段
+
+        public void Execute()
+        {
             (float div, float absorption) = (divAndAbsorption.x, divAndAbsorption.y);
 
-            int xz = startIndex / count;
+            var srcPtr  = (float*)Front.GetUnsafeReadOnlyPtr();
+            var destPtr = (float*)Back.GetUnsafePtr();
 
-            int x = xz % N.x,
-                z = xz / N.x;
+            for (int k = 0; k < iterateCount; k++)
+            {
+                for (int y = 1; y <= N.y; y++)
+                {
+                    for (int z = 1; z <= N.z; z++)
+                    {
+                        bool isRed = ((y + z) & 1) == 0;
+                        
+                        int  index = GridUtils.GetIndex(1, y, z, dim);
 
-            int3 pos = new int3(x, 0 ,z);
+                        int end = index + N.x;
+
+                        index = math.select(index, index + 1, isRed);
+
+                        for (; index < end; index += 2)
+                        {
+                            float newValue = srcPtr[index] * div +
+                                             (destPtr[index - stride.x] + destPtr[index + stride.x] +
+                                              destPtr[index - stride.y] + destPtr[index + stride.y] +
+                                              destPtr[index - stride.z] + destPtr[index + stride.z]) * absorption;
+
+                            destPtr[index] = newValue;
+                            // destPtr[index] = math.lerp(destPtr[index], newValue, 1.5f);//1.0-1.8
+                        }
+
+                    }
+                }
+                
+                for (int y = 1; y <= N.y; y++)
+                {
+                    for (int z = 1; z <= N.z; z++)
+                    {
+                        bool isRed = ((y + z) & 1) == 0;
+                        
+                        int  index = GridUtils.GetIndex(1, y, z, dim);
+
+                        int end = index + N.x;
+
+                        index = math.select(index + 1, index, isRed);
+
+                        for (; index < end; index += 2)
+                        {
+                            float newValue = srcPtr[index] * div +
+                                             (destPtr[index - stride.x] + destPtr[index + stride.x] +
+                                              destPtr[index - stride.y] + destPtr[index + stride.y] +
+                                              destPtr[index - stride.z] + destPtr[index + stride.z]) * absorption;
+
+                            destPtr[index] = newValue;
+                            // destPtr[index] = math.lerp(destPtr[index], newValue, 1.5f);//1.0-1.8
+                        }
+
+                    }
+                }
+
+                GridUtils.SetBoundary(ref destPtr, b, in stride, in N, in dim);
+            }
+
+        }
+
+        //x方向，输入batchCount = N.x
+        public void Execute(int startIndex, int count)
+        {
+            //   
+            (float div, float absorption) = (divAndAbsorption.x, divAndAbsorption.y);
+
+            int yz = startIndex / count;
+            int z  = yz         % N.z;
+            int y  = yz         / N.z;
+
+            bool isRed = ((y + z) & 1) == 0;
             
+            int3 pos   = new int3(0, y, z);
+
             int  index = GridUtils.GetIndex(pos + 1, dim);
-            
-            int4 stride = GridUtils.GetStride(dim);
+
+            int end = index + count;
+
+            index = math.select(index, index + 1, isRed == IsRedPhase);
 
             var srcPtr  = (float*)Front.GetUnsafeReadOnlyPtr();
             var destPtr = (float*)Back.GetUnsafePtr();
 
-            switch (convolutionMethod)
+            for (; index < end; index += 2)
             {
-                case ConvolutionMethod.LineSequence:
+                float newValue = srcPtr[index] * div +
+                                 (destPtr[index - stride.x] + destPtr[index + stride.x] +
+                                  destPtr[index - stride.y] + destPtr[index + stride.y] +
+                                  destPtr[index - stride.z] + destPtr[index + stride.z]) * absorption;
 
-                    for (int i = 0; i < count; i++)
-                    {
-                        destPtr[index] = srcPtr[index] * div +
-                                         (destPtr[index - stride.y] +
-                                          destPtr[index + stride.y]) * absorption;
-                        
-                        index += stride.y;
-                    }
-                    
-                    break;
-                case ConvolutionMethod.LineSlidingWindow:
-            
-                    float left = destPtr[index - stride.y],
-                          mid  = destPtr[index], 
-                          right;
-
-                    for (int i = 0; i < count; i++)
-                    {
-                        right = destPtr[index + stride.y];
-
-                        destPtr[index] = srcPtr[index] * div + (left + right) * absorption;
-
-                        (left, mid) = (mid, right);
-
-                        index += stride.y;
-                    }
-                    break;
+                destPtr[index] = newValue;
+                // destPtr[index] = math.lerp(destPtr[index], newValue, 1.5f);//1.0-1.8
             }
         }
 
-        public void UpdateParams(ref NativeArray<float>        back, ref NativeArray<float> front,
-                                 float             diff, float      deltaTime, 
-                                 float2            divAndAbsorption, 
-                                 ConvolutionMethod convolution)
+        public void UpdateParams(ref NativeArray<float> back, ref NativeArray<float> front,
+                                 float2                 divAndAbsorption,
+                                 int                    iterateCount = 1, int b = 0)
         {
             Back                  = back;
             Front                 = front.AsReadOnly();
-            diffusion             = diff;
-            this.deltaTime        = deltaTime;
             this.divAndAbsorption = divAndAbsorption;
-            convolutionMethod     = convolution;
-        }
-    }
-    
-    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
-                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
-                  /*Debug = true,*/
-                  DisableSafetyChecks = true)]
-    internal unsafe struct DiffuseZJob : IJobParallelForBatch
-    {
-        [NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
-        public NativeArray<float> Back;
-
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
-        public NativeArray<float>.ReadOnly Front;
-
-        [ReadOnly] public int3 dim;
-        [ReadOnly] public int3 N;
-
-        [ReadOnly] private float diffusion; //[0,1]
-        [ReadOnly] private float deltaTime;
-
-        [ReadOnly] private ConvolutionMethod convolutionMethod;
-
-        [ReadOnly] private float2 divAndAbsorption;
-        
-        public void Execute(int startIndex, int count)
-        {
-            // float a = deltaTime * diffusion * (N.x * N.y * N.z);
-            //
-            // float div        = 1 / (1 + 2 * a);
-            // float absorption = a * div;
-            
-            (float div, float absorption) = (divAndAbsorption.x, divAndAbsorption.y);
-
-            int xy = startIndex / count;
-            int x  = xy         % N.x;
-            int y  = xy         / N.x;
-            
-            int3 pos = new int3(x, y, 0);
-
-            int  index  = GridUtils.GetIndex(pos + 1, dim);
-            int4 stride = GridUtils.GetStride(dim);
-
-            var srcPtr  = (float*)Front.GetUnsafeReadOnlyPtr();
-            var destPtr = (float*)Back.GetUnsafePtr();
-
-            switch (convolutionMethod)
-            {
-                case ConvolutionMethod.LineSequence:
-                    
-                    for (int i = 0; i < count; i++)
-                    {
-                        destPtr[index] = srcPtr[index] * div +
-                                         (destPtr[index - stride.z] +
-                                          destPtr[index + stride.z]) * absorption;
-                        
-                        index += stride.z;
-                    }
-                    break;
-                case ConvolutionMethod.LineSlidingWindow:
-                    
-                    float left = destPtr[index - stride.z],
-                          mid  = destPtr[index], 
-                          right;
-
-                    for (int i = 0; i < count; i++)
-                    {
-                        right = destPtr[index + stride.z];
-
-                        destPtr[index] = srcPtr[index] * div + (left + right) * absorption;
-
-                        (left, mid) = (mid, right);
-
-                        index += stride.z;
-                    }
-                    break;
-            }
-        }
-
-        public void UpdateParams(ref NativeArray<float>        back, ref NativeArray<float> front, 
-                                 float             diff, float      deltaTime, 
-                                 float2            divAndAbsorption, 
-                                 ConvolutionMethod convolution)
-        {
-            Back                  = back;
-            Front                 = front.AsReadOnly();
-            diffusion             = diff;
-            this.deltaTime        = deltaTime;
-            this.divAndAbsorption = divAndAbsorption;
-            convolutionMethod     = convolution;
+            this.iterateCount     = iterateCount;
+            this.b                = b;
         }
     }
 
     /// <summary>
     /// length=6, batch=1
     /// 舒适,but 只分6个任务，实际时间又不如按行并行
-    /// 为什么别的job为了省一个分支弄了三份变体，这个又妥协了
     /// </summary>
-    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
                   FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
                   /*Debug = true,*/
                   DisableSafetyChecks = true)]
@@ -419,7 +557,7 @@ namespace UnityEngine.PBD
 //                case 3:
 //                    break;
 //            }
-            // 处理每个边界方向
+            // 处理每个边界方向,分支过多
             if (boxMinDis.x == 0)
             {
                 int3 neighbor = pos;
@@ -465,31 +603,71 @@ namespace UnityEngine.PBD
     //move
     [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
                   FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
-                  Debug = true,
+                  // Debug = true,
                   DisableSafetyChecks = true)]
-    internal unsafe struct AdvectJob : IJobParallelForBatch
+    internal unsafe struct AdvectJob : IJobParallelForBatch, IJob
     {
-        [WriteOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction, NativeDisableContainerSafetyRestriction]
+        [WriteOnly, NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
         private NativeArray<float> Back;
 
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction, NativeDisableContainerSafetyRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
         private NativeArray<float>.ReadOnly Front;
 
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction, NativeDisableContainerSafetyRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
         private NativeArray<float>.ReadOnly X;
 
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction, NativeDisableContainerSafetyRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
         private NativeArray<float>.ReadOnly Y;
 
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction, NativeDisableContainerSafetyRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
         private NativeArray<float>.ReadOnly Z;
 
-        [ReadOnly] public  int3   dim;
-        [ReadOnly] public  int3   N;
+        [ReadOnly] public int3   dim;
+        [ReadOnly] public int3   N;
+        [ReadOnly] public int4   stride;
+        [ReadOnly] public float3 maxRange;
 
         [ReadOnly] private float deltaTime;
-        
-        [ReadOnly] private bool stopNan;
+
+        public void Execute()
+        {
+            var srcPtr  = (float*)Front.GetUnsafeReadOnlyPtr();
+            var destPtr = (float*)Back.GetUnsafePtr();
+            var xPtr    = (float*)X.GetUnsafeReadOnlyPtr();
+            var yPtr    = (float*)Y.GetUnsafeReadOnlyPtr();
+            var zPtr    = (float*)Z.GetUnsafeReadOnlyPtr();
+
+            float3 dt0 = deltaTime * (float3)N;
+
+            int3 dir = new int3(1, 0, 0);
+
+            for (int y = 1; y <= N.y; y++)
+            {
+                for (int z = 1; z <= N.z; z++)
+                {
+                    int3 pos = new int3(1, y, z);
+
+                    int index = GridUtils.GetIndex(pos, dim);
+                    int end   = index + N.x;
+                    
+                    for (; index < end; index++)
+                    {
+                        float3 vel = new float3(xPtr[index], yPtr[index], zPtr[index]);
+
+                        float3 prePos = pos - dt0 * vel;
+
+                        prePos = math.clamp(prePos, 0.5f, maxRange);
+
+                        float result = GridUtils.TrilinearStandard(prePos, ref srcPtr, dim);
+
+                        (destPtr[index], pos) = (result, pos + dir);
+                    }
+                }
+            }
+
+            //只有密度用这个
+            GridUtils.SetBoundary(ref destPtr, 0, in stride, in N, in dim);
+        }
 
         public void Execute(int startIndex, int count)
         {
@@ -501,14 +679,14 @@ namespace UnityEngine.PBD
             
             int3 pos = GridUtils.GetGridPos(startIndex, N) + 1;
 
-            float3 dt0      = deltaTime * (float3)N,
-                   maxRange = (float3)dim - 0.5f;
+            float3 dt0 = deltaTime * (float3)N;
 
             int index = GridUtils.GetIndex(pos, dim);
+            int end   = index + count;
 
             int3 dir = new int3(1, 0, 0);
             
-            for (int i = 0; i < count; i++)
+            for (; index < end; index++)
             {
                 float3 vel = new float3(xPtr[index], yPtr[index], zPtr[index]);
 
@@ -519,7 +697,7 @@ namespace UnityEngine.PBD
 
                 float result = GridUtils.TrilinearStandard(prePos, ref srcPtr, dim);
 
-                (destPtr[index], pos, index) = (result, pos + dir, index + 1);
+                (destPtr[index], pos) = (result, pos + dir);
             }
         }
 
@@ -539,30 +717,188 @@ namespace UnityEngine.PBD
         }
     }
 
-    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default,
+                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
+                  // Debug = true,
+                  DisableSafetyChecks = true)]
+    internal unsafe struct AdvectVelocityJob : IJobParallelForBatch, IJob
+    {
+        [WriteOnly, NativeDisableParallelForRestriction]
+        private NativeArray<float> BackX;
+
+        [WriteOnly, NativeDisableParallelForRestriction]
+        private NativeArray<float> BackY;
+        
+        [WriteOnly, NativeDisableParallelForRestriction]
+        private NativeArray<float> BackZ;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        private NativeArray<float>.ReadOnly X;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        private NativeArray<float>.ReadOnly Y;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        private NativeArray<float>.ReadOnly Z;
+
+        [ReadOnly] public int3   dim;
+        [ReadOnly] public int3   N;
+        [ReadOnly] public int4   stride;
+        [ReadOnly] public float3 maxRange;
+
+        [ReadOnly] private float deltaTime;
+
+        public void Execute()
+        {
+            var dxPtr = (float*)BackX.GetUnsafePtr();
+            var dyPtr = (float*)BackY.GetUnsafePtr();
+            var dzPtr = (float*)BackZ.GetUnsafePtr();
+            var xPtr  = (float*)X.GetUnsafeReadOnlyPtr();
+            var yPtr  = (float*)Y.GetUnsafeReadOnlyPtr();
+            var zPtr  = (float*)Z.GetUnsafeReadOnlyPtr();
+
+            float3 dt0 = deltaTime * (float3)N;
+
+            int3 dir = new int3(1, 0, 0);
+
+            for (int y = 1; y <= N.y; y++)
+            {
+                for (int z = 1; z <= N.z; z++)
+                {
+                    int3 pos = new int3(1, y, z);
+
+                    int index = GridUtils.GetIndex(pos, dim);
+                    int end   = index + N.x;
+
+                    for (; index < end; index++)
+                    {
+                        float3 vel = new float3(xPtr[index], yPtr[index], zPtr[index]);
+
+                        float3 prePos = pos - dt0 * vel;
+
+                        prePos = math.clamp(prePos, 0.5f, maxRange);
+
+                        float3 result = GridUtils.TrilinearStandard(prePos, ref xPtr, ref yPtr, ref zPtr, dim);
+
+                        (dxPtr[index], dyPtr[index], dzPtr[index], pos) = (result.x, result.y, result.z, pos + dir);
+                    }
+                }
+            }
+
+            GridUtils.SetBoundary(ref dxPtr, 1, in stride, in N, in dim);
+            GridUtils.SetBoundary(ref dyPtr, 2, in stride, in N, in dim);
+            GridUtils.SetBoundary(ref dzPtr, 3, in stride, in N, in dim);
+        }
+
+        public void Execute(int startIndex, int count)
+        {
+            var dxPtr = (float*)BackX.GetUnsafePtr();
+            var dyPtr = (float*)BackY.GetUnsafePtr();
+            var dzPtr = (float*)BackZ.GetUnsafePtr();
+            var xPtr  = (float*)X.GetUnsafeReadOnlyPtr();
+            var yPtr  = (float*)Y.GetUnsafeReadOnlyPtr();
+            var zPtr  = (float*)Z.GetUnsafeReadOnlyPtr();
+            
+            int3 pos = GridUtils.GetGridPos(startIndex, N) + 1;
+
+            float3 dt0 = deltaTime * (float3)N;
+
+            int index = GridUtils.GetIndex(pos, dim);
+            int end   = index + count;
+
+            int3 dir = new int3(1, 0, 0);
+            
+            for (; index < end; index++)
+            {
+                float3 vel = new float3(xPtr[index], yPtr[index], zPtr[index]);
+
+                float3 prePos = pos - dt0 * vel;
+
+                prePos = math.clamp(prePos, 0.5f, maxRange);
+
+                float3 result = GridUtils.TrilinearStandard(prePos, ref xPtr, ref yPtr, ref zPtr, dim);
+
+                (dxPtr[index], dyPtr[index], dzPtr[index], pos) = (result.x, result.y, result.z, pos + dir);
+            }
+        }
+
+        public void UpdateParams(ref NativeArray<float> backx,      
+                                 ref NativeArray<float> backy, 
+                                 ref NativeArray<float> backz, 
+                                 ref NativeArray<float> x, 
+                                 ref NativeArray<float> y, 
+                                 ref NativeArray<float> z,
+                                 float                  deltaTime)
+        {
+            BackX          = backx;
+            BackY          = backy;
+            BackZ          = backz;
+            X              = x.AsReadOnly();
+            Y              = y.AsReadOnly();
+            Z              = z.AsReadOnly();
+            this.deltaTime = deltaTime;
+        }
+    }
+
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
                   FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
                   /*Debug = true,*/
                   DisableSafetyChecks = true)]
-    internal unsafe struct DivergenceJob : IJobParallelForBatch
+    internal unsafe struct DivergenceJob : IJobParallelForBatch, IJob
     {
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction]
         private NativeArray<float>.ReadOnly X;
 
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction]
         private NativeArray<float>.ReadOnly Y;
 
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction]
         private NativeArray<float>.ReadOnly Z;
 
-        [WriteOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [WriteOnly, NativeDisableParallelForRestriction]
         private NativeArray<float> Pressure;
 
-        [WriteOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [WriteOnly, NativeDisableParallelForRestriction]
         private NativeArray<float> Divergence;
 
         [ReadOnly] public int3 dim;
         
         [ReadOnly] public int3 N;
+        
+        [ReadOnly] public int4 stride;
+
+        public void Execute()
+        {
+            float3 h = - 0.5f * MathematicsUtil.one / N;
+            
+            var xPtr = (float*)X.GetUnsafeReadOnlyPtr();
+            var yPtr = (float*)Y.GetUnsafeReadOnlyPtr();
+            var zPtr = (float*)Z.GetUnsafeReadOnlyPtr();
+
+            var divPtr = (float*)Divergence.GetUnsafePtr();
+            var prePtr = (float*)Pressure.GetUnsafePtr();
+
+            for (int y = 1; y <= N.y; y++)
+            {
+                for (int z = 1; z <= N.z; z++)
+                {
+                    int  index = GridUtils.GetIndex(1, y, z, dim);
+                    for (int i = 0; i <= N.x; i++)
+                    {
+                        divPtr[index] = h.x * (xPtr[index + stride.x] - xPtr[index - stride.x]) +
+                                        h.y * (yPtr[index + stride.y] - yPtr[index - stride.y]) +
+                                        h.z * (zPtr[index + stride.z] - zPtr[index - stride.z]);
+                
+                        prePtr[index] = 0;
+
+                        index += stride.x;
+                    }
+                }
+            }
+
+            GridUtils.SetBoundary(ref divPtr, 0, in stride, in N, in dim);
+            GridUtils.SetBoundary(ref prePtr, 0, in stride, in N, in dim);
+        }
 
         public void Execute(int startIndex, int count)
         {
@@ -574,8 +910,6 @@ namespace UnityEngine.PBD
 
             int3 pos   = new int3(0, y, z);
             int  index = GridUtils.GetIndex(pos + 1, dim);
-            
-            int4 stride = GridUtils.GetStride(dim);
             
             var  xPtr   = (float*)X.GetUnsafeReadOnlyPtr();
             var  yPtr   = (float*)Y.GetUnsafeReadOnlyPtr();
@@ -615,83 +949,183 @@ namespace UnityEngine.PBD
     //set bnt 0 div p
     
 
-    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
                   FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
                   /*Debug = true,*/
                   DisableSafetyChecks = true)]
-    internal unsafe struct PressureJob : IJobParallelForBatch
+    internal unsafe struct PressureJob : IJobParallelForBatch, IJob
     {
-        [NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [NativeDisableParallelForRestriction]
         private NativeArray<float> Pressure;
 
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction]
         private NativeArray<float>.ReadOnly Divergence;
 
         [ReadOnly] public int3 dim;
         
         [ReadOnly] public int3 N;
         
-        [ReadOnly] private const float inv = 0.16666667f;
+        [ReadOnly] public int4 stride;
+
+        [ReadOnly] private int iterateCount;
         
+        [ReadOnly] public bool IsRedPhase; 
+        
+        [ReadOnly] private const float inv = 0.16666667f;
+
+        public void Execute()
+        {
+            var divPtr = (float*)Divergence.GetUnsafeReadOnlyPtr();
+            var prePtr = (float*)Pressure.GetUnsafePtr();
+
+            for (int k = 0; k < iterateCount; k++)
+            {
+                for (int y = 1; y <= N.y; y++)
+                {
+                    for (int z = 1; z <= N.z; z++)
+                    {
+                        bool isRed = ((y + z) & 1) == 0;
+                        
+                        int3 pos   = new int3(1, y, z);
+                        int  index = GridUtils.GetIndex(pos, dim);
+                        
+                        int end = index + N.x;
+                        
+                        index = math.select(index, index + 1, isRed);//
+
+                        for (; index < end; index += 2)
+                        {
+                            prePtr[index] = (divPtr[index]            +
+                                             prePtr[index - stride.x] + prePtr[index + stride.x] +
+                                             prePtr[index - stride.y] + prePtr[index + stride.y] +
+                                             prePtr[index - stride.z] + prePtr[index + stride.z]) * inv;
+                        }
+                    }
+                }
+                
+                for (int y = 1; y <= N.y; y++)
+                {
+                    for (int z = 1; z <= N.z; z++)
+                    {
+                        bool isRed = ((y + z) & 1) == 0;
+                        
+                        int3 pos   = new int3(1, y, z);
+                        int  index = GridUtils.GetIndex(pos, dim);
+                        
+                        int end = index + N.x;
+                        
+                        index = math.select(index + 1, index, isRed);//
+
+                        for (; index < end; index += 2)
+                        {
+                            prePtr[index] = (divPtr[index]            +
+                                             prePtr[index - stride.x] + prePtr[index + stride.x] +
+                                             prePtr[index - stride.y] + prePtr[index + stride.y] +
+                                             prePtr[index - stride.z] + prePtr[index + stride.z]) * inv;
+                        }
+                    }
+                }
+
+                GridUtils.SetBoundary(ref prePtr, 0, in stride, in N, in dim);
+            }
+        }
+
         public void Execute(int startIndex, int count)
         {
             int yz = startIndex / count;
             int z  = yz         % N.z;
             int y  = yz         / N.z;
 
+            bool isRed = ((y + z) & 1) == 0;
+
             int3 pos   = new int3(0, y, z);
             int  index = GridUtils.GetIndex(pos + 1, dim);
 
-            int4 stride = GridUtils.GetStride(dim);
+            int end = index + count;
+
+            index = math.select(index, index + 1, isRed == IsRedPhase);
 
             var divPtr = (float*)Divergence.GetUnsafeReadOnlyPtr();
             var prePtr = (float*)Pressure.GetUnsafePtr();
 
-            for (int i = 0; i < count; i++)
+            for (; index < end; index += 2)
             {
                 prePtr[index] = (divPtr[index]            +
                                  prePtr[index - stride.x] + prePtr[index + stride.x] +
                                  prePtr[index - stride.y] + prePtr[index + stride.y] +
                                  prePtr[index - stride.z] + prePtr[index + stride.z]) * inv;
-                    
-                // index += stride.x;
-                index ++;
+                
             }
         }
         
-        public void UpdateParams(ref NativeArray<float> pressure, ref NativeArray<float> divergence)
+        public void UpdateParams(ref NativeArray<float> pressure, ref NativeArray<float> divergence, int iterate)
         {
-            Pressure   = pressure;
-            Divergence = divergence.AsReadOnly();
+            Pressure     = pressure;
+            Divergence   = divergence.AsReadOnly();
+            iterateCount = iterate;
         }
     }
     //set bnt p
     
 
-    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
                   FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
                   /*Debug = true,*/
                   DisableSafetyChecks = true)]
-    internal unsafe struct CorrectVelocityJob : IJobParallelForBatch
+    internal unsafe struct CorrectVelocityJob : IJobParallelForBatch, IJob
     {
-        [NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [NativeDisableParallelForRestriction]
         private NativeArray<float> X;
 
-        [NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [NativeDisableParallelForRestriction]
         private NativeArray<float> Y;
 
-        [NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [NativeDisableParallelForRestriction]
         private NativeArray<float> Z;
         
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction]
         private NativeArray<float>.ReadOnly Pressure;
 
         [ReadOnly] public int3 dim;
         
-        [ReadOnly] public int3   N;
+        [ReadOnly] public int3 N;
         
-        [ReadOnly] private bool stopNan;
-        
+        [ReadOnly] public int4 stride;
+
+        public void Execute()
+        {
+            float3 H = - 0.5f * (float3)N;
+            
+            var xPtr   = (float*)X.GetUnsafePtr();
+            var yPtr   = (float*)Y.GetUnsafePtr();
+            var zPtr   = (float*)Z.GetUnsafePtr();
+            var prePtr = (float*)Pressure.GetUnsafeReadOnlyPtr();
+
+            for (int y = 1; y <= N.y; y++)
+            {
+                for (int z = 1; z <= N.z; z++)
+                {
+                    int3 pos   = new int3(1, y, z);
+                    
+                    int  index = GridUtils.GetIndex(pos, dim);
+
+                    for (int i = 0; i < N.x; i++)
+                    {
+                        xPtr[index] += H.x * (prePtr[index + stride.x] - prePtr[index - stride.x]);
+                        yPtr[index] += H.y * (prePtr[index + stride.y] - prePtr[index - stride.y]);
+                        zPtr[index] += H.z * (prePtr[index + stride.z] - prePtr[index - stride.z]);
+                
+                        // index += stride.x;
+                        index ++;
+                    }
+                }
+            }
+            
+            GridUtils.SetBoundary(ref xPtr, 1, in stride, in N, in dim);
+            GridUtils.SetBoundary(ref yPtr, 2, in stride, in N, in dim);
+            GridUtils.SetBoundary(ref zPtr, 3, in stride, in N, in dim);
+        }
+
         public void Execute(int startIndex, int count)
         {
             float3 H = - 0.5f * (float3)N;
@@ -702,8 +1136,6 @@ namespace UnityEngine.PBD
 
             int3 pos   = new int3(0, y, z);
             int  index = GridUtils.GetIndex(pos + 1, dim);
-
-            int4 stride = GridUtils.GetStride(dim);
             
             var xPtr   = (float*)X.GetUnsafePtr();
             var yPtr   = (float*)Y.GetUnsafePtr();
@@ -738,10 +1170,10 @@ namespace UnityEngine.PBD
     [BurstCompile]
     internal unsafe struct WindSimulateSaveJob : IJob
     {
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction]
         private NativeArray<float>.ReadOnly Back;
 
-        [WriteOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [WriteOnly, NativeDisableParallelForRestriction]
         private NativeArray<float> ExchangeData;
 
         [ReadOnly] public int size;
@@ -762,13 +1194,13 @@ namespace UnityEngine.PBD
     
     
     //外部系统写入exchange buffer
-    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
                   FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
                   // Debug = true,
                   DisableSafetyChecks = true)]
-    internal unsafe struct WriteDensityFieldJob : IJobParallelForBatch
+    internal unsafe struct WriteDensityFieldJob : IJobParallelForBatch, IJob
     {
-        [WriteOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [WriteOnly, NativeDisableParallelForRestriction]
         private NativeArray<float> D;
         
         [ReadOnly, NativeDisableParallelForRestriction]
@@ -776,8 +1208,40 @@ namespace UnityEngine.PBD
         
         [ReadOnly] public int3   dim;
         [ReadOnly] public int3   N;
-        [ReadOnly] public float3 ori;
-        
+        [ReadOnly] private float3 ori;
+
+        public void Execute()
+        {
+            var denPtr = (float*)D.GetUnsafePtr();
+            var rigPtr = (PBDCustomColliderInfo*)Rigibodys.GetUnsafeReadOnlyPtr();
+
+
+            for (int y = 0; y < dim.y; y++)
+            {
+                for (int z = 0; z < dim.z; z++)
+                {
+                    int3 pos   = new int3(0, y, z);
+                    
+                    float3 wpos   = (pos + ori);
+
+                    int index = GridUtils.GetIndex(pos, dim);
+                    int end   = index + dim.x;
+
+                    for (; index < end; index++)
+                    {
+                        float result = 0;
+                        
+                        for (int i = 0; i < Rigibodys.Length; i++)
+                            result += rigPtr[i].AddDensityValue(wpos);
+                        
+                        denPtr[index] =  result;
+
+                        wpos.x += 1;
+                    }
+                }
+            }
+        }
+
         public void Execute(int startIndex, int count)
         {
             int3 pos = GridUtils.GetGridPos(startIndex, dim);
@@ -813,28 +1277,63 @@ namespace UnityEngine.PBD
     }
     
     
-    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default, 
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
                   FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
                   /*Debug = true,*/
                   DisableSafetyChecks = true)]
-    internal unsafe struct WriteVelocityFieldJob : IJobParallelForBatch
+    internal unsafe struct WriteVelocityFieldJob : IJobParallelForBatch, IJob
     {
-        [WriteOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [WriteOnly, NativeDisableParallelForRestriction]
         private NativeArray<float> X;
 
-        [WriteOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [WriteOnly, NativeDisableParallelForRestriction]
         private NativeArray<float> Y;
 
-        [WriteOnly, NativeDisableParallelForRestriction, NativeDisableUnsafePtrRestriction]
+        [WriteOnly, NativeDisableParallelForRestriction]
         private NativeArray<float> Z;
 
         [ReadOnly, NativeDisableParallelForRestriction]
-        public NativeArray<PBDForceField>.ReadOnly ForceFields;
+        private NativeArray<PBDForceField>.ReadOnly ForceFields;
 
         [ReadOnly] public int3   dim;
         [ReadOnly] public int3   N;
-        [ReadOnly] public float3 ori;
-        
+        [ReadOnly] private float3 ori;
+
+        public void Execute()
+        {
+            var xPtr = (float*)X.GetUnsafePtr();
+            var yPtr = (float*)Y.GetUnsafePtr();
+            var zPtr = (float*)Z.GetUnsafePtr();
+
+            var forcePtr = (PBDForceField*)ForceFields.GetUnsafeReadOnlyPtr();
+
+            for (int y = 0; y < dim.y; y++)
+            {
+                for (int z = 0; z < dim.z; z++)
+                {
+                    int3 pos = new int3(0, y, z);
+
+                    float3 wpos = (pos + ori);
+
+                    int index = GridUtils.GetIndex(pos, dim);
+                    int end   = index + dim.x;
+
+                    for (; index < end; index++)
+                    {
+                        float3 result = float3.zero;
+                        
+                        for (int j = 0; j < ForceFields.Length; j++)
+                            result += forcePtr[j].CaculateForce(wpos, float3.zero);
+                        
+                        (xPtr[index], yPtr[index], zPtr[index]) =  (result.x, result.y, result.z);
+
+                        wpos.x += 1;
+                    }
+                }
+            }
+
+        }
+
         public void Execute(int startIndex, int count)
         {
             int3 pos = GridUtils.GetGridPos(startIndex, dim);
@@ -849,7 +1348,6 @@ namespace UnityEngine.PBD
             
             for (int index = startIndex; index < startIndex + count; index++)
             {
-                // float3 result = -velocity;
                 float3 result = float3.zero;
                 
                 for (int j = 0; j < ForceFields.Length; j++)

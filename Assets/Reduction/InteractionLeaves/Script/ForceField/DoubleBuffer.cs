@@ -17,45 +17,38 @@ namespace UnityEngine.PBD
     }
 
     [GenerateTestsForBurstCompatibility]
-    public unsafe class DoubleBuffer : IDisposable
+    public class DoubleBuffer : IDisposable
     {
-        [NativeDisableUnsafePtrRestriction] private NativeArray<float> dataA;
+        private NativeArray<float> dataA;
 
-        [NativeDisableUnsafePtrRestriction] private NativeArray<float> dataB;
+        private NativeArray<float> dataB;
 
         private bool m_AisBackBuffer;
 
         private readonly int3 dimensions;
-        private readonly int3 dimensionsMask;
         private readonly int3 N;
 
         private readonly BoundaryType m_boundaryType;
+
         public int Length
         {
-            get
-            {
-                return dimensions.x * dimensions.y * dimensions.z;
-            }
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => dimensions.x * dimensions.y * dimensions.z;
         }
 
 
         public int BatchCountX => dimensions.x;
-        public int BatchCountZ => dimensions.z;
-        public int BatchCountY => dimensions.y;
 
         public int  NSize => N.x * N.y * N.z;
         
         public int IteratorX => N.x;
-        public int IteratorZ => N.z;
         public int IteratorY => N.y;
-        
-        // public int GetIteratorDir
+        public int IteratorZ => N.z;
 
-        private AddSourceJob _addSourceJob;
-        private DiffuseXJob  _diffuseXJob;
-        private DiffuseYJob  _diffuseYJob;
-        private DiffuseZJob  _diffuseZJob;
-        private AdvectJob    _advectJob;
+        private AddSourceJob   _addSourceJob;
+        private DiffuseLineJob _diffuseLineJob;
+        private DiffuseRBGSJob _diffuseRGBS;
+        private AdvectJob      _advectJob;
 
         private SetBoundaryParallelForJob _setBoundaryParallelForJob;
 
@@ -64,14 +57,12 @@ namespace UnityEngine.PBD
         public bool IsCreated
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            // get => dataA != null && dataB != null;
             get => dataA.IsCreated && dataB.IsCreated;
         }
 
         public DoubleBuffer(int3 dims, Allocator allocator, BoundaryType type = BoundaryType.Density)
         {
             dimensions      = dims;
-            dimensionsMask  = dims - 1;
             m_AisBackBuffer = true;
             m_boundaryType  = type;
             N               = dims - 2;
@@ -82,12 +73,13 @@ namespace UnityEngine.PBD
 
             dataA = new NativeArray<float>(length, allocator);
             dataB = new NativeArray<float>(length, allocator);
+            
+            int4 stride = GridUtils.GetStride(dimensions);
 
-            _addSourceJob = new AddSourceJob() { };
-            _diffuseXJob  = new DiffuseXJob() { dim = dimensions, N = N, };
-            _diffuseYJob  = new DiffuseYJob() { dim = dimensions, N = N };
-            _diffuseZJob  = new DiffuseZJob() { dim = dimensions, N = N };
-            _advectJob    = new AdvectJob() { dim   = dimensions, N = N, };
+            _addSourceJob   = new AddSourceJob() { };
+            _diffuseLineJob = new DiffuseLineJob() { dim = dimensions, N = N, stride   = stride };
+            _diffuseRGBS    = new DiffuseRBGSJob() { dim = dimensions, N = N, stride   = stride };
+            _advectJob      = new AdvectJob() { dim      = dimensions, N = N, stride = stride, maxRange = (float3)dims - 0.5f};
 
             _setBoundaryParallelForJob = new SetBoundaryParallelForJob() { dim = dimensions, };
 
@@ -124,88 +116,116 @@ namespace UnityEngine.PBD
             Swap(ref front, ref source);
         }
 
-        public JobHandle AddSource(JobHandle dep, ref NativeArray<float> source, float deltaTime)
+        public JobHandle AddSource(JobHandle dep, ref NativeArray<float> source, float deltaTime,
+                                   ParallelUnit parallelUnit = ParallelUnit.Line)
         {
             ExchangeBufferWithFront(ref source);
-            
+
             _addSourceJob.UpdateParams(ref back, ref front, deltaTime);
 
-            return _addSourceJob.ScheduleByRef(Length, BatchCountX, dep);
+            return parallelUnit switch
+                   {
+                       ParallelUnit.Line => _addSourceJob.ScheduleByRef(Length, BatchCountX, dep),
+                       _                 => _addSourceJob.ScheduleByRef(dep),
+                   };
         }
 
         /// <summary>
-        /// 密度场为Diffusion，速度场为viscosty
+        /// 
         /// </summary>
         /// <param name="dep"></param>
-        /// <param name="ratio"></param>
+        /// <param name="ratio">密度场为Diffusion，速度场为viscosty</param>
         /// <param name="deltaTime"></param>
         /// <param name="iterateCount"></param>
+        /// <param name="parallelUnit"></param>
         /// <param name="convolution"></param>
         /// <returns></returns>
         public JobHandle Diffuse(JobHandle dep, float ratio, float deltaTime, int iterateCount = 10, 
-                                 ConvolutionMethod convolution = ConvolutionMethod.LineSequence)
+                                 ParallelUnit parallelUnit = ParallelUnit.Line,
+                                 ConvolutionMethod convolution = ConvolutionMethod.LineSlidingWindow)
         {
             Swap();
-            
-            float  a                = deltaTime * ratio * (N.x * N.y * N.z);
 
-            float  div              = 1 / math.mad(2, a, 1);
-            float  absorption       = a * div;
-            float2 DivAndAbsorption = new float2(div, absorption);
+            float a = deltaTime * ratio * (N.x * N.y * N.z);
 
-            _diffuseXJob.UpdateParams(ref back, ref front, ratio, deltaTime, DivAndAbsorption, convolution);
-            _diffuseYJob.UpdateParams(ref back, ref front, ratio, deltaTime, DivAndAbsorption, convolution);
-            _diffuseZJob.UpdateParams(ref back, ref front, ratio, deltaTime, DivAndAbsorption, convolution);
-            
-            for (int i = 0; i < iterateCount; i++)
+            switch (convolution)
             {
-                dep = _diffuseXJob.ScheduleByRef(NSize, IteratorX, dep);
-                dep = _diffuseYJob.ScheduleByRef(NSize, IteratorY, dep);
-                dep = _diffuseZJob.ScheduleByRef(NSize, IteratorZ, dep);
+                case ConvolutionMethod.LineSequence:
+                case ConvolutionMethod.LineSlidingWindow:
+                {
+                    float  div              = 1 / math.mad(2, a, 1);
+                    float  absorption       = a * div;
+                    float2 DivAndAbsorption = new float2(div, absorption);
+
+                    _diffuseLineJob.UpdateParams(ref back, ref front, DivAndAbsorption, convolution,
+                                                 iterateCount:iterateCount, (int)m_boundaryType);
                     
-                dep = SetBoundaryClampBack(dep);
+                    if (parallelUnit == ParallelUnit.Line)
+                    {
+                        for (int i = 0; i < iterateCount; i++)
+                        {
+                            _diffuseLineJob.iterateDirection = 0;
+
+                            dep = _diffuseLineJob.ScheduleByRef(NSize, IteratorX, dep);
+
+                            _diffuseLineJob.iterateDirection = 2;
+
+                            dep = _diffuseLineJob.ScheduleByRef(NSize, IteratorZ, dep);
+
+                            _diffuseLineJob.iterateDirection = 1;
+
+                            dep = _diffuseLineJob.ScheduleByRef(NSize, IteratorY, dep);
+
+                            dep = SetBoundaryClampBack(dep);
+                        }
+                    }
+                    else
+                    {
+                        // for (int i = 0; i < iterateCount; i++)
+                        // {
+                        //     
+                        // }
+
+                        dep = _diffuseLineJob.ScheduleByRef(dep);
+                    }
+                }
+                    break;
+
+                case ConvolutionMethod.RBGSeidel:
+                {
+                    float  div              = 1 / math.mad(6, a, 1);
+                    float  absorption       = a * div;
+                    float2 DivAndAbsorption = new float2(div, absorption);
+                    
+                    _diffuseRGBS.UpdateParams(ref back, ref front, DivAndAbsorption, iterateCount:iterateCount, (int)m_boundaryType);
+
+                    if (parallelUnit == ParallelUnit.Line)
+                    {
+                        for (int i = 0; i < iterateCount; i++)
+                        {
+                            _diffuseRGBS.IsRedPhase = true;
+
+                            dep = _diffuseRGBS.ScheduleByRef(NSize, IteratorX, dep);
+
+                            _diffuseRGBS.IsRedPhase = false;
+
+                            dep = _diffuseRGBS.ScheduleByRef(NSize, IteratorX, dep);
+
+                            dep = SetBoundaryClampBack(dep);
+                        }
+                    }
+                    else
+                    {
+                        // for (int i = 0; i < iterateCount; i++)
+                        // {
+                        //     
+                        // }
+
+                        dep = _diffuseRGBS.ScheduleByRef(dep);
+                    }
+                }
+                    break;
             }
-            // switch (m_boundaryType)
-            // {
-            //     case BoundaryType.Density:
-            //         
-            //         for (int i = 0; i < iterateCount; i++)
-            //         {
-            //             dep = _diffuseXJob.ScheduleByRef(NSize, IteratorX, dep);
-            //             dep = _diffuseYJob.ScheduleByRef(NSize, IteratorY, dep);
-            //             dep = _diffuseZJob.ScheduleByRef(NSize, IteratorZ, dep);
-            //         
-            //             dep = SetBoundaryClampBack(dep);
-            //         }
-            //         break;
-            //     case BoundaryType.VelocityX:
-            //         for (int i = 0; i < iterateCount; i++)
-            //         {
-            //             dep = _diffuseXJob.ScheduleByRef(NSize, IteratorX, dep);
-            //         
-            //             dep = SetBoundaryClampBack(dep);
-            //         }
-            //         break;
-            //     case BoundaryType.VelocityY:
-            //     
-            //         for (int i = 0; i < iterateCount; i++)
-            //         {
-            //             dep = _diffuseYJob.ScheduleByRef(NSize, IteratorY, dep);
-            //         
-            //             dep = SetBoundaryClampBack(dep);
-            //         }
-            //         break;
-            //     case BoundaryType.VelocityZ:
-            //     
-            //         for (int i = 0; i < iterateCount; i++)
-            //         {
-            //             dep = _diffuseZJob.ScheduleByRef(NSize, IteratorZ, dep);
-            //         
-            //             dep = SetBoundaryClampBack(dep);
-            //         }
-            //         break;
-            //     
-            // }
 
             return dep;
         }
@@ -222,16 +242,24 @@ namespace UnityEngine.PBD
             return SetBoundaryClamp(dep, ref back, (int)m_boundaryType);
         }
 
-        //density
-        public JobHandle Advect(JobHandle dep, ref NativeArray<float> u, ref NativeArray<float> v, ref NativeArray<float> w, float deltaTime)
+        //density  速度合并更新了不走这
+        public JobHandle Advect(JobHandle    dep, ref NativeArray<float> u, ref NativeArray<float> v, ref NativeArray<float> w, float deltaTime, 
+                                ParallelUnit parallelUnit = ParallelUnit.Line)
         {
-            // Swap();
+            Swap();
 
             _advectJob.UpdateParams(ref back, ref front, ref u, ref v, ref w, deltaTime);
 
-            dep = _advectJob.ScheduleByRef(NSize, IteratorX, dep);
+            if (parallelUnit == ParallelUnit.Line)
+            {
+                dep = _advectJob.ScheduleByRef(NSize, IteratorX, dep);
 
-            dep = SetBoundaryClampBack(dep);
+                dep = SetBoundaryClampBack(dep);
+            }
+            else
+            {
+                dep = _advectJob.ScheduleByRef(dep);
+            }
             return dep;
         }
 
