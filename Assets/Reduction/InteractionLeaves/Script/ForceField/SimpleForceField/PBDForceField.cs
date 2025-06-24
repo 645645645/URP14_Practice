@@ -24,6 +24,10 @@ namespace UnityEngine.PBD
         public float3 MoveDir;
         public float3 MoveDir1; //lerp PosDir
 
+        //bounds
+        public float3 boundsMin;
+        public float3 boundsMax;
+        
         //world
         public float4x4 loacl2World;
 
@@ -32,6 +36,14 @@ namespace UnityEngine.PBD
         // private float maxF;
 
         private float4 DisParams;
+
+        public bool IsLargeVolume
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => math.lengthsq(boundsMax - boundsMin) > 9;
+        }
+
+        public PBDBounds Bounds => new() { Min = boundsMin, Max = boundsMax };
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Prepare()
@@ -92,6 +104,9 @@ namespace UnityEngine.PBD
                 default:
                     break;
             }
+
+            boundsMin = C0 - Radius;
+            boundsMax = C0 + Radius;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -350,8 +365,8 @@ namespace UnityEngine.PBD
         private bool IsBernoulliForceRange(float3 position)
         {
             //假设俩不远
-            return (math.lengthsq(position - C0) <= DisParams.x /*||
-                    math.lengthsq(position - C1) <= DisParams.x*/) &&
+            return (math.lengthsq(position - C0) <= DisParams.x ||
+                    math.lengthsq(position - C1) <= DisParams.x) &&
                    math.lengthsq(MoveDir) > 1e-5f;
         }
 
@@ -359,11 +374,11 @@ namespace UnityEngine.PBD
         private float3 CaculateBernoulliForceForce(in float3 position, in float3 velocity)
         {
             float3
-                toCenter0 = position - C0;
-                // toCenter1 = position - C1;
+                toCenter0 = position - C0,
+                toCenter1 = position - C1;
             float
-                distance0 = math.lengthsq(toCenter0);
-                // distance1 = math.lengthsq(toCenter1);
+                distance0 = math.lengthsq(toCenter0),
+                distance1 = math.lengthsq(toCenter1);
 
             if ((distance0 > DisParams.x) || distance0 < 1e-5f || DisParams.w < 0.01f)
                 return float3.zero;
@@ -372,7 +387,7 @@ namespace UnityEngine.PBD
             //     return float3.zero;
 
             distance0 = math.sqrt(distance0);
-            // distance1 = math.sqrt(distance1);
+            distance1 = math.sqrt(distance1);
 
             toCenter0 /= distance0;
             // toCenter1 /= distance1;

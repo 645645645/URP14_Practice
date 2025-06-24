@@ -5,7 +5,7 @@ namespace UnityEngine.PBD
     [DisallowMultipleComponent]
     public class PBDForce : MonoBehaviour
     {
-        [Header("旧力场改崩了，两边物理量不一样，不想抢救了"), Space]
+        [Header("旧力场改崩了不想救"),Space]
         public PBDForceType m_ForceType;
 
         [Tooltip("一般是xz水平方向，y竖直")] public Vector3 m_Force = Vector3.zero;
@@ -23,7 +23,7 @@ namespace UnityEngine.PBD
         private          Vector3        _lastForce;
         private          Vector3        _lastCenter;
         private          float          _lastRadius;
-        private          float          _lastForceRatui;
+        private          float          _lastForceRatio;
         private readonly WaitForSeconds _waitForSeconds = new(0.1f);
         private          Coroutine      _wait;
 
@@ -31,7 +31,7 @@ namespace UnityEngine.PBD
         private bool HasValueChanged()
         {
             return !_lastForce.Equals(m_Force)           ||
-                   !_lastForceRatui.Equals(m_ForceRatio) ||
+                   !_lastForceRatio.Equals(m_ForceRatio) ||
                    !_lastCenter.Equals(m_Center)         ||
                    !_lastRadius.Equals(m_Radius);
         }
@@ -62,7 +62,7 @@ namespace UnityEngine.PBD
                     _lastCenter = m_Center;
                     _lastRadius = m_Radius;
 
-                    _lastForceRatui = m_ForceRatio;
+                    _lastForceRatio = m_ForceRatio;
                 }
             }
         }

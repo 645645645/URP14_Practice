@@ -184,6 +184,7 @@ namespace UnityEngine.PBD
         void Dispose()
         {
             _lastJobHandle.Complete();
+            // _windFiledJobHandle.Complete();
             _clearHashMapJobHandle.Complete();
             _clearHashMapJobHandleSPH.Complete();
             m_nativeData.Dispose();
@@ -215,6 +216,9 @@ namespace UnityEngine.PBD
 
             if (!nativeData.Initialize(properties))
                 return;
+
+            if (properties.extForceMode == ExtForceMode.WindField)
+                m_windField.Initialize();
 
             IndexFormat format = properties.indexFormat;
 
@@ -884,9 +888,9 @@ namespace UnityEngine.PBD
                                 Normals            = nativeData.m_normals.AsReadOnly(),
                                 InvMasses          = nativeData.m_invmasses.AsReadOnly(),
                                 Areas              = nativeData.m_areas.AsReadOnly(),
-                                WindFieldX         = m_windField.exchange_VelocityX.back.AsReadOnly(),
-                                WindFieldY         = m_windField.exchange_VelocityY.back.AsReadOnly(),
-                                WindFieldZ         = m_windField.exchange_VelocityZ.back.AsReadOnly(),
+                                WindFieldX         = m_windField.Exchange_VelocityX.AsReadOnly(),
+                                WindFieldY         = m_windField.Exchange_VelocityY.AsReadOnly(),
+                                WindFieldZ         = m_windField.Exchange_VelocityZ.AsReadOnly(),
                                 PostForceFields    = nativeData.m_postForceFields.AsParallelReader(),
                                 damping            = properties.m_Damping,
                                 wind               = properties.m_WindFroce,
@@ -1444,6 +1448,7 @@ namespace UnityEngine.PBD
                     {
                         StaticList             = nativeData.m_StaticList.AsParallelReader(),
                         QuadPredictedPositions = nativeData.m_quadPredictedPosition.AsReadOnly(),
+                        QuadInvMasses          = nativeData.m_quadInvMass.AsReadOnly(),
                         ForceFields            = nativeData.m_forceFields.AsParallelReader(),
                         // PostForceFields = nativeData.m_postForceFields.AsParallelReader(),
                         IsNeedUpdates = nativeData.m_isNeedUpdates,
@@ -1513,9 +1518,9 @@ namespace UnityEngine.PBD
                             StaticList              = nativeData.m_StaticList.AsParallelReader(),
                             QuadPredictedPositions  = nativeData.m_quadPredictedPosition.AsReadOnly(),
                             QuadInvMasses           = nativeData.m_quadInvMass.AsReadOnly(),
-                            WindFieldX              = m_windField.exchange_VelocityX.back.AsReadOnly(),
-                            WindFieldY              = m_windField.exchange_VelocityY.back.AsReadOnly(),
-                            WindFieldZ              = m_windField.exchange_VelocityZ.back.AsReadOnly(),
+                            WindFieldX              = m_windField.Exchange_VelocityX.AsReadOnly(),
+                            WindFieldY              = m_windField.Exchange_VelocityY.AsReadOnly(),
+                            WindFieldZ              = m_windField.Exchange_VelocityZ.AsReadOnly(),
                             IsNeedUpdates           = nativeData.m_isNeedUpdates,
                             windFieldBounds         = m_windField.WindFieldBounds,
                             windFieldOri            = m_windField.WindFieldOri,
@@ -1669,9 +1674,9 @@ namespace UnityEngine.PBD
                 {
                     var canWriteToFront = JobHandle.CombineDependencies(prepareReadForceJobHandle, prepareReadHandle);
                     
-                    m_windField.UpdateFieldParams(deltaTime);
+                    m_windField.UpdateFieldParams();
                             
-                    var windSimlateJobHandle = m_windField.SimulateParallel(_lastJobHandle, deltaTime);
+                    var windSimlateJobHandle = m_windField.Simulate(_lastJobHandle, deltaTime);
                 
                     var writeSoureceJobhandle = m_windField.WriteToFrontBuffer(canWriteToFront, ref nativeData.m_forceFields, ref nativeData.m_rigibodyColliders);
                     

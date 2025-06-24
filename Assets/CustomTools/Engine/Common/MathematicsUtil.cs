@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine.Jobs;
@@ -53,6 +54,13 @@ public static class MathematicsUtil
         if (value.z) mask |= 0x04;
         if (value.w) mask |= 0x08;
         return mask;
+    }
+    
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsPowerOfTwo(int x)
+    {
+        return (x & x - 1) == 0;
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

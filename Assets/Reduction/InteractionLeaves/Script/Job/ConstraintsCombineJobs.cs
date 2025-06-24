@@ -226,7 +226,9 @@ namespace UnityEngine.PBD
         
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<QuadPredictedPositions>.ReadOnly QuadPredictedPositions;
-
+        
+        [ReadOnly, NativeDisableParallelForRestriction]
+        public NativeArray<QuadInvMass>.ReadOnly QuadInvMasses;
         
         [ReadOnly, NativeDisableParallelForRestriction]
         public NativeArray<PBDForceField>.ReadOnly ForceFields;
@@ -246,11 +248,12 @@ namespace UnityEngine.PBD
                 int quadID = StaticList[index];
 
                 float3 pos = QuadPredictedPositions[quadID].Value;
-                
+
+                float invMass = QuadInvMasses[quadID].Value;
                 
                 for (int i = 0; i < ForceFields.Length; i++)
                 {
-                    if (ForceFields[i].IsInRange(pos))
+                    if (math.length(ForceFields[i].CaculateForce(pos, float3.zero)) * invMass > 5)
                     {
                         IsNeedUpdates[quadID] = new IsNeedUpdate() { Value = true };
                         break;
@@ -882,6 +885,8 @@ namespace UnityEngine.PBD
                    Y = (float*)WindFieldY.GetUnsafeReadOnlyPtr(),
                    Z = (float*)WindFieldZ.GetUnsafeReadOnlyPtr();
 
+            float threshold = activeVelocityThreshold * 100;
+
             for (int index = start; index < start + count; index++)
             {
                 int quadID = updatePtr[index];
@@ -896,7 +901,7 @@ namespace UnityEngine.PBD
                 float3 wind = GridUtils.TrilinearStandard(plocal, ref X, ref Y, ref Z, dim);
 
                 //速度场当成力场
-                if (math.length(wind) * QuadInvMasses[quadID].Value * 0.01f > activeVelocityThreshold)
+                if (math.length(wind) * QuadInvMasses[quadID].Value > threshold)
                     IsNeedUpdates[quadID] = new IsNeedUpdate() { Value = true };
             }
         }

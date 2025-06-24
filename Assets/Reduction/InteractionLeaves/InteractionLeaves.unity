@@ -228,7 +228,7 @@ MonoBehaviour:
     indexFormat: 1
     uvNormalFormat: 0
     maxLeavesCount: 20000
-    productNumPerSecond: 150
+    productNumPerSecond: 100
     staticVelocityThreshold: 0.002
     massRange: {x: 1.5, y: 2.5}
     foldAngleRange: {x: -20, y: 20}
@@ -634,7 +634,7 @@ PrefabInstance:
     - target: {fileID: 4778734422814558811, guid: 4122c2b757815f3418c34b45cc3a6264,
         type: 3}
       propertyPath: m_IsActive
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 5016792105919948062, guid: 4122c2b757815f3418c34b45cc3a6264,
         type: 3}
@@ -1183,7 +1183,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_ForceType: 1
-  m_Force: {x: -1, y: 1, z: 1}
+  m_Force: {x: -1, y: 2, z: 1}
   m_Center: {x: 0, y: 0, z: 0}
   m_Radius: 2
   m_ForceRatio: 1
@@ -1900,16 +1900,18 @@ MonoBehaviour:
   diffusion: 0.5
   vicosity: 0.5
   iterationsCountPreFrame: 2
-  activeVelocityThreshold: 0.05
+  activeVelocityThreshold: 0.03
   windFieldCenter: {fileID: 2124775051}
   gridSize:
     x: 32
     y: 16
     z: 32
   centerOffset: {x: 0, y: 0, z: 0}
+  dataFormat: 0
   parallelUnit: 1
   convolutionMethod: 2
   useDensityField: 0
+  forwardAdvectRatio: 0.5
   drawPos: 0
   drawDir: 0
   drawBounds: 0
@@ -2400,7 +2402,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1826977362
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2873,9 +2875,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_ForceType: 3
-  m_Force: {x: 2, y: 2, z: 1}
+  m_Force: {x: 1, y: 1, z: 1}
   m_Center: {x: 0, y: 0, z: 0}
-  m_Radius: 1
+  m_Radius: 0.87
   m_ForceRatio: 0.1
   m_LerpPosRatio: 30
 --- !u!114 &2124775062
@@ -3055,7 +3057,7 @@ MonoBehaviour:
   m_Force: {x: 2, y: 3, z: 1}
   m_Center: {x: 0, y: 1, z: 1}
   m_Radius: 3
-  m_ForceRatio: 0.2
+  m_ForceRatio: 0.5
   m_LerpPosRatio: 5
 --- !u!1660057539 &9223372036854775807
 SceneRoots:

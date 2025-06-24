@@ -86,7 +86,7 @@ namespace UnityEngine.PBD
         public Vector3 m_WindFroce = new Vector3(0, 0,     0);
         public Vector3 m_Gravity   = new Vector3(0, -9.8f, 0);
 
-        public ExtForceMode extForceMode = ExtForceMode.Simple;
+        [_ReadOnlyInPlayMode] public ExtForceMode extForceMode = ExtForceMode.Simple;
 
         [Header("Collision Settings"), Space, _ReadOnlyInPlayMode]
         public ParticlesCollisionMode particlesCollisionMode = ParticlesCollisionMode.CompactHash;

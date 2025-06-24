@@ -356,57 +356,37 @@ namespace UnityEngine.PBD
 
             for (int k = 0; k < iterateCount; k++)
             {
-                for (int y = 1; y <= N.y; y++)
+                bool readAlpha = false;
+                do
                 {
-                    for (int z = 1; z <= N.z; z++)
+                    for (int y = 1; y <= N.y; y++)
                     {
-                        bool isRed = ((y + z) & 1) == 0;
-                        
-                        int  index = GridUtils.GetIndex(1, y, z, dim);
-
-                        int end = index + N.x;
-
-                        index = math.select(index, index + 1, isRed);
-
-                        for (; index < end; index += 2)
+                        for (int z = 1; z <= N.z; z++)
                         {
-                            float newValue = srcPtr[index] * div +
-                                             (destPtr[index - stride.x] + destPtr[index + stride.x] +
-                                              destPtr[index - stride.y] + destPtr[index + stride.y] +
-                                              destPtr[index - stride.z] + destPtr[index + stride.z]) * absorption;
-
-                            destPtr[index] = newValue;
-                            // destPtr[index] = math.lerp(destPtr[index], newValue, 1.5f);//1.0-1.8
-                        }
-
-                    }
-                }
-                
-                for (int y = 1; y <= N.y; y++)
-                {
-                    for (int z = 1; z <= N.z; z++)
-                    {
-                        bool isRed = ((y + z) & 1) == 0;
+                            bool isRed = ((y + z) & 1) == 0;
                         
-                        int  index = GridUtils.GetIndex(1, y, z, dim);
+                            int  index = GridUtils.GetIndex(1, y, z, dim);
 
-                        int end = index + N.x;
+                            int end = index + N.x;
 
-                        index = math.select(index + 1, index, isRed);
+                            index = math.select(index, index + 1, isRed != readAlpha);
 
-                        for (; index < end; index += 2)
-                        {
-                            float newValue = srcPtr[index] * div +
-                                             (destPtr[index - stride.x] + destPtr[index + stride.x] +
-                                              destPtr[index - stride.y] + destPtr[index + stride.y] +
-                                              destPtr[index - stride.z] + destPtr[index + stride.z]) * absorption;
+                            for (; index < end; index += 2)
+                            {
+                                float newValue = srcPtr[index] * div +
+                                                 (destPtr[index - stride.x] + destPtr[index + stride.x] +
+                                                  destPtr[index - stride.y] + destPtr[index + stride.y] +
+                                                  destPtr[index - stride.z] + destPtr[index + stride.z]) * absorption;
 
-                            destPtr[index] = newValue;
-                            // destPtr[index] = math.lerp(destPtr[index], newValue, 1.5f);//1.0-1.8
+                                destPtr[index] = newValue;
+                                // destPtr[index] = math.lerp(destPtr[index], newValue, 1.5f);//1.0-1.8
+                            }
+
                         }
-
                     }
-                }
+
+                    readAlpha = !readAlpha;
+                } while (readAlpha);
 
                 GridUtils.SetBoundary(ref destPtr, b, in stride, in N, in dim);
             }
@@ -468,13 +448,21 @@ namespace UnityEngine.PBD
                   FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
                   /*Debug = true,*/
                   DisableSafetyChecks = true)]
-    internal unsafe struct SetBoundaryParallelForJob : IJobParallelFor
+    internal unsafe struct SetBoundaryJob : IJobParallelFor, IJob
     {
-        [NativeDisableUnsafePtrRestriction] private NativeArray<float> Data;
+        [NativeDisableParallelForRestriction] private NativeArray<float> Data;
 
         [ReadOnly] public  int3 dim;
+        [ReadOnly] public  int3 N;
+        [ReadOnly] public  int4 stride;
         [ReadOnly] private int  b; // 边界类型 0密度  1x  2y  3z 速度
-        
+
+        public void Execute()
+        {
+            var ptr = (float*)Data.GetUnsafePtr();
+            GridUtils.SetBoundary(ref ptr, b, in stride, in N, in dim);
+        }
+
         public void Execute(int index)
         {
             int xStart = 0, xEnd = dim.x - 1;
@@ -605,29 +593,33 @@ namespace UnityEngine.PBD
                   FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
                   // Debug = true,
                   DisableSafetyChecks = true)]
-    internal unsafe struct AdvectJob : IJobParallelForBatch, IJob
+    internal unsafe struct ReverseAdvectDensityJob : IJobParallelForBatch, IJob
     {
-        [WriteOnly, NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
+        [NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
         private NativeArray<float> Back;
 
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction]
         private NativeArray<float>.ReadOnly Front;
 
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction]
         private NativeArray<float>.ReadOnly X;
 
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction]
         private NativeArray<float>.ReadOnly Y;
 
-        [ReadOnly, NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
+        [ReadOnly, NativeDisableParallelForRestriction]
         private NativeArray<float>.ReadOnly Z;
 
         [ReadOnly] public int3   dim;
         [ReadOnly] public int3   N;
         [ReadOnly] public int4   stride;
         [ReadOnly] public float3 maxRange;
+        
+        [ReadOnly] private const float min = float.MinValue / 2;
+        [ReadOnly] private const float max = float.MaxValue / 2;
 
         [ReadOnly] private float deltaTime;
+        [ReadOnly] private float ratio;
 
         public void Execute()
         {
@@ -638,8 +630,6 @@ namespace UnityEngine.PBD
             var zPtr    = (float*)Z.GetUnsafeReadOnlyPtr();
 
             float3 dt0 = deltaTime * (float3)N;
-
-            int3 dir = new int3(1, 0, 0);
 
             for (int y = 1; y <= N.y; y++)
             {
@@ -658,15 +648,15 @@ namespace UnityEngine.PBD
 
                         prePos = math.clamp(prePos, 0.5f, maxRange);
 
-                        float result = GridUtils.TrilinearStandard(prePos, ref srcPtr, dim);
+                        float result = GridUtils.TrilinearStandard(prePos, ref srcPtr, dim) * ratio;
 
-                        (destPtr[index], pos) = (result, pos + dir);
+                        GridUtils.AtomicAddSat(ref destPtr, index, result, min, max);
+
+                        pos.x++;
                     }
                 }
             }
 
-            //只有密度用这个
-            GridUtils.SetBoundary(ref destPtr, 0, in stride, in N, in dim);
         }
 
         public void Execute(int startIndex, int count)
@@ -694,10 +684,11 @@ namespace UnityEngine.PBD
 
                 prePos = math.clamp(prePos, 0.5f, maxRange);
 
+                float result = GridUtils.TrilinearStandard(prePos, ref srcPtr, dim) * ratio;
 
-                float result = GridUtils.TrilinearStandard(prePos, ref srcPtr, dim);
+                GridUtils.AtomicAddSat(ref destPtr, index, result, min, max);
 
-                (destPtr[index], pos) = (result, pos + dir);
+                pos.x++;
             }
         }
 
@@ -706,7 +697,8 @@ namespace UnityEngine.PBD
                                  ref NativeArray<float> x, 
                                  ref NativeArray<float> y, 
                                  ref NativeArray<float> z,
-                                 float      deltaTime)
+                                 float                  deltaTime,
+                                 float                  ratio)
         {
             Back           = back;
             Front          = front.AsReadOnly();
@@ -714,22 +706,147 @@ namespace UnityEngine.PBD
             Y              = y.AsReadOnly();
             Z              = z.AsReadOnly();
             this.deltaTime = deltaTime;
+            this.ratio     = ratio;
         }
     }
+
 
     [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default,
                   FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
                   // Debug = true,
                   DisableSafetyChecks = true)]
-    internal unsafe struct AdvectVelocityJob : IJobParallelForBatch, IJob
+    internal unsafe struct ForwardAdvectDensityJob : IJobParallelForBatch, IJob
     {
-        [WriteOnly, NativeDisableParallelForRestriction]
+        [NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
+        private NativeArray<float> Back;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        private NativeArray<float>.ReadOnly Front;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        private NativeArray<float>.ReadOnly X;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        private NativeArray<float>.ReadOnly Y;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        private NativeArray<float>.ReadOnly Z;
+
+        [ReadOnly] public int3   dim;
+        [ReadOnly] public int3   N;
+        [ReadOnly] public int4   stride;
+        [ReadOnly] public float3 maxRange;
+        
+        [ReadOnly] private const float min = float.MinValue / 32;
+        [ReadOnly] private const float max = float.MaxValue / 32;
+
+        [ReadOnly] private float deltaTime;
+        [ReadOnly] private float ratio;
+
+        public void Execute()
+        {
+            var srcPtr  = (float*)Front.GetUnsafeReadOnlyPtr();
+            var destPtr = (float*)Back.GetUnsafePtr();
+            var xPtr    = (float*)X.GetUnsafeReadOnlyPtr();
+            var yPtr    = (float*)Y.GetUnsafeReadOnlyPtr();
+            var zPtr    = (float*)Z.GetUnsafeReadOnlyPtr();
+
+            float3 dt0 = deltaTime * (float3)N;
+
+            for (int y = 1; y <= N.y; y++)
+            {
+                for (int z = 1; z <= N.z; z++)
+                {
+                    int3 pos = new int3(1, y, z);
+
+                    int index = GridUtils.GetIndex(pos, dim);
+                    int end   = index + N.x;
+                    
+                    for (; index < end; index++)
+                    {
+                        float3 vel = new float3(xPtr[index], yPtr[index], zPtr[index]);
+
+                        float energy = srcPtr[index] * ratio;
+
+                        float3 prePos = pos + dt0 * vel;
+                        
+                        prePos = math.clamp(prePos, 0.5f, maxRange);
+
+                        GridUtils.TrilinearStandardAtomicWrite(prePos, ref destPtr, dim,
+                                                               energy, min, max);
+                        pos.x++;
+                    }
+                }
+            }
+
+        }
+
+        public void Execute(int startIndex, int count)
+        {
+            var srcPtr  = (float*)Front.GetUnsafeReadOnlyPtr();
+            var destPtr = (float*)Back.GetUnsafePtr();
+            var xPtr    = (float*)X.GetUnsafeReadOnlyPtr();
+            var yPtr    = (float*)Y.GetUnsafeReadOnlyPtr();
+            var zPtr    = (float*)Z.GetUnsafeReadOnlyPtr();
+            
+            int3 pos = GridUtils.GetGridPos(startIndex, N) + 1;
+
+            float3 dt0 = deltaTime * (float3)N;
+
+            int index = GridUtils.GetIndex(pos, dim);
+            int end   = index + count;
+
+            int3 dir = new int3(1, 0, 0);
+            
+            for (; index < end; index++)
+            {
+                float3 vel = new float3(xPtr[index], yPtr[index], zPtr[index]);
+
+                float energy = srcPtr[index] * ratio;
+
+                float3 prePos = pos - dt0 * vel;
+
+                prePos = math.clamp(prePos, 0.5f, maxRange);
+
+                GridUtils.TrilinearStandardAtomicWrite(prePos, ref destPtr, dim,
+                                                       energy, min, max);
+                
+                pos.x++;
+            }
+        }
+
+        public void UpdateParams(ref NativeArray<float> back,      
+                                 ref NativeArray<float> front, 
+                                 ref NativeArray<float> x, 
+                                 ref NativeArray<float> y, 
+                                 ref NativeArray<float> z,
+                                 float                  deltaTime,
+                                 float                  ratio)
+        {
+            Back           = back;
+            Front          = front.AsReadOnly();
+            X              = x.AsReadOnly();
+            Y              = y.AsReadOnly();
+            Z              = z.AsReadOnly();
+            this.deltaTime = deltaTime;
+            this.ratio     = ratio;
+        }
+    }
+    
+
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default,
+                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
+                  // Debug = true,
+                  DisableSafetyChecks = true)]
+    internal unsafe struct ReverseAdvectVelocityJob : IJobParallelForBatch, IJob
+    {
+        [NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
         private NativeArray<float> BackX;
 
-        [WriteOnly, NativeDisableParallelForRestriction]
+        [NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
         private NativeArray<float> BackY;
         
-        [WriteOnly, NativeDisableParallelForRestriction]
+        [NativeDisableParallelForRestriction, NativeDisableContainerSafetyRestriction]
         private NativeArray<float> BackZ;
 
         [ReadOnly, NativeDisableParallelForRestriction]
@@ -745,8 +862,12 @@ namespace UnityEngine.PBD
         [ReadOnly] public int3   N;
         [ReadOnly] public int4   stride;
         [ReadOnly] public float3 maxRange;
-
+        
+        [ReadOnly] private const float min = float.MinValue / 2;
+        [ReadOnly] private const float max = float.MaxValue / 2;
+        
         [ReadOnly] private float deltaTime;
+        [ReadOnly] private float ratio;
 
         public void Execute()
         {
@@ -758,8 +879,6 @@ namespace UnityEngine.PBD
             var zPtr  = (float*)Z.GetUnsafeReadOnlyPtr();
 
             float3 dt0 = deltaTime * (float3)N;
-
-            int3 dir = new int3(1, 0, 0);
 
             for (int y = 1; y <= N.y; y++)
             {
@@ -778,16 +897,17 @@ namespace UnityEngine.PBD
 
                         prePos = math.clamp(prePos, 0.5f, maxRange);
 
-                        float3 result = GridUtils.TrilinearStandard(prePos, ref xPtr, ref yPtr, ref zPtr, dim);
+                        float3 result = GridUtils.TrilinearStandard(prePos, ref xPtr, ref yPtr, ref zPtr, dim) * ratio;
 
-                        (dxPtr[index], dyPtr[index], dzPtr[index], pos) = (result.x, result.y, result.z, pos + dir);
+                        GridUtils.AtomicAddSat(ref dxPtr, index, result.x, min, max);
+                        GridUtils.AtomicAddSat(ref dyPtr, index, result.y, min, max);
+                        GridUtils.AtomicAddSat(ref dzPtr, index, result.z, min, max);
+
+                        pos.x++;
                     }
                 }
             }
 
-            GridUtils.SetBoundary(ref dxPtr, 1, in stride, in N, in dim);
-            GridUtils.SetBoundary(ref dyPtr, 2, in stride, in N, in dim);
-            GridUtils.SetBoundary(ref dzPtr, 3, in stride, in N, in dim);
         }
 
         public void Execute(int startIndex, int count)
@@ -805,8 +925,6 @@ namespace UnityEngine.PBD
 
             int index = GridUtils.GetIndex(pos, dim);
             int end   = index + count;
-
-            int3 dir = new int3(1, 0, 0);
             
             for (; index < end; index++)
             {
@@ -816,9 +934,13 @@ namespace UnityEngine.PBD
 
                 prePos = math.clamp(prePos, 0.5f, maxRange);
 
-                float3 result = GridUtils.TrilinearStandard(prePos, ref xPtr, ref yPtr, ref zPtr, dim);
+                float3 result = GridUtils.TrilinearStandard(prePos, ref xPtr, ref yPtr, ref zPtr, dim) * ratio;
 
-                (dxPtr[index], dyPtr[index], dzPtr[index], pos) = (result.x, result.y, result.z, pos + dir);
+                GridUtils.AtomicAddSat(ref dxPtr, index, result.x, min, max);
+                GridUtils.AtomicAddSat(ref dyPtr, index, result.y, min, max);
+                GridUtils.AtomicAddSat(ref dzPtr, index, result.z, min, max);
+                
+                pos.x++;
             }
         }
 
@@ -828,7 +950,8 @@ namespace UnityEngine.PBD
                                  ref NativeArray<float> x, 
                                  ref NativeArray<float> y, 
                                  ref NativeArray<float> z,
-                                 float                  deltaTime)
+                                 float                  deltaTime,
+                                 float                  ratio)
         {
             BackX          = backx;
             BackY          = backy;
@@ -837,6 +960,134 @@ namespace UnityEngine.PBD
             Y              = y.AsReadOnly();
             Z              = z.AsReadOnly();
             this.deltaTime = deltaTime;
+            this.ratio     = ratio;
+        }
+    }
+
+    
+    [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Default,
+                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
+                  // Debug = true,
+                  DisableSafetyChecks = true)]
+    internal unsafe struct ForwardAdvectVelocityJob : IJobParallelForBatch, IJob
+    {
+        [NativeDisableParallelForRestriction]
+        private NativeArray<float> BackX;
+
+        [NativeDisableParallelForRestriction]
+        private NativeArray<float> BackY;
+        
+        [NativeDisableParallelForRestriction]
+        private NativeArray<float> BackZ;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        private NativeArray<float>.ReadOnly X;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        private NativeArray<float>.ReadOnly Y;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        private NativeArray<float>.ReadOnly Z;
+
+        [ReadOnly] public int3   dim;
+        [ReadOnly] public int3   N;
+        [ReadOnly] public int4   stride;
+        [ReadOnly] public float3 maxRange;
+        
+        [ReadOnly] private const float min = float.MinValue / 2;
+        [ReadOnly] private const float max = float.MaxValue / 2;
+
+        [ReadOnly] private float deltaTime;
+        [ReadOnly] private float ratio;
+
+        public void Execute()
+        {
+            var dxPtr = (float*)BackX.GetUnsafePtr();
+            var dyPtr = (float*)BackY.GetUnsafePtr();
+            var dzPtr = (float*)BackZ.GetUnsafePtr();
+            var xPtr  = (float*)X.GetUnsafeReadOnlyPtr();
+            var yPtr  = (float*)Y.GetUnsafeReadOnlyPtr();
+            var zPtr  = (float*)Z.GetUnsafeReadOnlyPtr();
+
+            // float3 rangeLen = maxRange - 0.5f;
+
+            float3 dt0 = deltaTime * (float3)N;
+
+            for (int y = 1; y <= N.y; y++)
+            {
+                for (int z = 1; z <= N.z; z++)
+                {
+                    int3 pos = new int3(1, y, z);
+
+                    int index = GridUtils.GetIndex(pos, dim);
+                    int end   = index + N.x;
+
+                    for (; index < end; index++)
+                    {
+                        float3 vel = new float3(xPtr[index], yPtr[index], zPtr[index]);
+
+                        float3 prePos = pos + dt0 * vel;
+
+                        prePos = math.clamp(prePos, 0.5f, maxRange);
+                        
+                        GridUtils.TrilinearStandardAtomicWrite(prePos, ref dxPtr, ref dyPtr, ref dzPtr,
+                                                               dim, vel * ratio, min, max);
+
+                        pos.x++;
+                    }
+                }
+            }
+            
+        }
+
+        public void Execute(int startIndex, int count)
+        {
+            var dxPtr = (float*)BackX.GetUnsafePtr();
+            var dyPtr = (float*)BackY.GetUnsafePtr();
+            var dzPtr = (float*)BackZ.GetUnsafePtr();
+            var xPtr  = (float*)X.GetUnsafeReadOnlyPtr();
+            var yPtr  = (float*)Y.GetUnsafeReadOnlyPtr();
+            var zPtr  = (float*)Z.GetUnsafeReadOnlyPtr();
+            
+            int3 pos = GridUtils.GetGridPos(startIndex, N) + 1;
+
+            float3 dt0 = deltaTime * (float3)N;
+
+            int index = GridUtils.GetIndex(pos, dim);
+            int end   = index + count;
+            
+            for (; index < end; index++)
+            {
+                float3 vel = new float3(xPtr[index], yPtr[index], zPtr[index]);
+
+                float3 prePos = pos + dt0 * vel;
+
+                prePos = math.clamp(prePos, 0.5f, maxRange);
+                        
+                GridUtils.TrilinearStandardAtomicWrite(prePos, ref dxPtr, ref dyPtr, ref dzPtr,
+                                                       dim, vel * ratio, min, max);
+                
+                pos.x++;
+            }
+        }
+
+        public void UpdateParams(ref NativeArray<float> backx,      
+                                 ref NativeArray<float> backy, 
+                                 ref NativeArray<float> backz,
+                                 ref NativeArray<float> x,
+                                 ref NativeArray<float> y,
+                                 ref NativeArray<float> z,
+                                 float                  deltaTime,
+                                 float                  ratio)
+        {
+            BackX          = backx;
+            BackY          = backy;
+            BackZ          = backz;
+            X              = x.AsReadOnly();
+            Y              = y.AsReadOnly();
+            Z              = z.AsReadOnly();
+            this.deltaTime = deltaTime;
+            this.ratio     = ratio;
         }
     }
 
@@ -980,51 +1231,34 @@ namespace UnityEngine.PBD
 
             for (int k = 0; k < iterateCount; k++)
             {
-                for (int y = 1; y <= N.y; y++)
+                bool readAlpha = false;
+                do
                 {
-                    for (int z = 1; z <= N.z; z++)
+                    for (int y = 1; y <= N.y; y++)
                     {
-                        bool isRed = ((y + z) & 1) == 0;
-                        
-                        int3 pos   = new int3(1, y, z);
-                        int  index = GridUtils.GetIndex(pos, dim);
-                        
-                        int end = index + N.x;
-                        
-                        index = math.select(index, index + 1, isRed);//
-
-                        for (; index < end; index += 2)
+                        for (int z = 1; z <= N.z; z++)
                         {
-                            prePtr[index] = (divPtr[index]            +
-                                             prePtr[index - stride.x] + prePtr[index + stride.x] +
-                                             prePtr[index - stride.y] + prePtr[index + stride.y] +
-                                             prePtr[index - stride.z] + prePtr[index + stride.z]) * inv;
+                            bool isRed = ((y + z) & 1) == 0;
+                        
+                            int3 pos   = new int3(1, y, z);
+                            int  index = GridUtils.GetIndex(pos, dim);
+                        
+                            int end = index + N.x;
+                        
+                            index = math.select(index, index + 1, isRed != readAlpha);//
+
+                            for (; index < end; index += 2)
+                            {
+                                prePtr[index] = (divPtr[index]            +
+                                                 prePtr[index - stride.x] + prePtr[index + stride.x] +
+                                                 prePtr[index - stride.y] + prePtr[index + stride.y] +
+                                                 prePtr[index - stride.z] + prePtr[index + stride.z]) * inv;
+                            }
                         }
                     }
-                }
-                
-                for (int y = 1; y <= N.y; y++)
-                {
-                    for (int z = 1; z <= N.z; z++)
-                    {
-                        bool isRed = ((y + z) & 1) == 0;
-                        
-                        int3 pos   = new int3(1, y, z);
-                        int  index = GridUtils.GetIndex(pos, dim);
-                        
-                        int end = index + N.x;
-                        
-                        index = math.select(index + 1, index, isRed);//
-
-                        for (; index < end; index += 2)
-                        {
-                            prePtr[index] = (divPtr[index]            +
-                                             prePtr[index - stride.x] + prePtr[index + stride.x] +
-                                             prePtr[index - stride.y] + prePtr[index + stride.y] +
-                                             prePtr[index - stride.z] + prePtr[index + stride.z]) * inv;
-                        }
-                    }
-                }
+                    
+                    readAlpha = !readAlpha;
+                } while (readAlpha);
 
                 GridUtils.SetBoundary(ref prePtr, 0, in stride, in N, in dim);
             }
@@ -1166,6 +1400,28 @@ namespace UnityEngine.PBD
     // set bnt x y z
 
 
+    //两边共用
+    [BurstCompile]
+    internal unsafe struct WindFieldClearDataJob<T> : IJob where T : unmanaged
+    {
+        [WriteOnly, NativeDisableParallelForRestriction]
+        private NativeArray<T> Data;
+
+        [ReadOnly] public int size;
+        
+        public void Execute()
+        {
+            var ptr  = Data.GetUnsafePtr();
+            UnsafeUtility.MemSet(ptr, 0x00, size);
+        }
+        
+        public void UpdateParams(ref NativeArray<T> data)
+        {
+            Data         = data;
+        }
+    }
+
+
     //模拟结束 结果保存 下一帧其他系统取用
     [BurstCompile]
     internal unsafe struct WindSimulateSaveJob : IJob
@@ -1198,9 +1454,9 @@ namespace UnityEngine.PBD
                   FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
                   // Debug = true,
                   DisableSafetyChecks = true)]
-    internal unsafe struct WriteDensityFieldJob : IJobParallelForBatch, IJob
+    internal unsafe struct WriteDensityFieldJob : IJob
     {
-        [WriteOnly, NativeDisableParallelForRestriction]
+        [NativeDisableParallelForRestriction]
         private NativeArray<float> D;
         
         [ReadOnly, NativeDisableParallelForRestriction]
@@ -1208,71 +1464,115 @@ namespace UnityEngine.PBD
         
         [ReadOnly] public int3   dim;
         [ReadOnly] public int3   N;
-        [ReadOnly] private float3 ori;
+        [ReadOnly] public float3 maxRange;
+
+        [ReadOnly] private PBDBounds windFieldBounds;
+        [ReadOnly] private float3    ori;
 
         public void Execute()
         {
             var denPtr = (float*)D.GetUnsafePtr();
             var rigPtr = (PBDCustomColliderInfo*)Rigibodys.GetUnsafeReadOnlyPtr();
 
-
-            for (int y = 0; y < dim.y; y++)
+            for (int i = 0; i < Rigibodys.Length; i++)
             {
-                for (int z = 0; z < dim.z; z++)
+                var rigi   = rigPtr[i];
+                var bounds = rigi.Bounds;
+                if(!MathematicsUtil.AABBOverlap(bounds, windFieldBounds))
+                    continue;
+                
+                int3 Min = new (math.max(math.floor(bounds.Min - ori), 0)),
+                     Max = new (math.min(math.ceil(bounds.Max  - ori), maxRange));
+
+                int3 Size = Max - Min;
+
+                //刚体还得考虑超薄。。
+                // if (rigi.IsLargeVolume)
                 {
-                    int3 pos   = new int3(0, y, z);
-                    
-                    float3 wpos   = (pos + ori);
-
-                    int index = GridUtils.GetIndex(pos, dim);
-                    int end   = index + dim.x;
-
-                    for (; index < end; index++)
+                    for (int y = Min.y; y <= Max.y; y++)
                     {
-                        float result = 0;
-                        
-                        for (int i = 0; i < Rigibodys.Length; i++)
-                            result += rigPtr[i].AddDensityValue(wpos);
-                        
-                        denPtr[index] =  result;
+                        for (int z = Min.z; z <= Max.z; z++)
+                        {
+                            int3   pos   = new int3(Min.x, y, z);
+                            
+                            float3 wpos  = (pos + ori);
+                            
+                            int index = GridUtils.GetIndex(pos, dim);
+                            int end   = index + Size.x;
+                            
+                            for (; index <= end; index++)
+                            {
+                                var result = rigi.AddDensityValue(wpos);
 
-                        wpos.x += 1;
+                                denPtr[index] += result;
+
+                                wpos.x += 1;
+                            }
+                        }
                     }
                 }
+                // else
+                // {
+                //     float cellSize = 0.2f * math.cmin(bounds.Size);
+                //
+                //     float extents = cellSize * -0.5f + 0.5f;
+                //     
+                //     for (int y = Min.y; y <= Max.y; y++)
+                //     {
+                //         for (int z = Min.z; z <= Max.z; z++)
+                //         {
+                //             int3 pos = new int3(Min.x, y, z);
+                //
+                //             float3 center = pos + ori;
+                //
+                //             int index = GridUtils.GetIndex(pos, dim);
+                //             int end   = index + Size.x;
+                //
+                //             for (; index <= end; index++)
+                //             {
+                //                 //小格子内
+                //                 float3 min = math.max(center - extents, bounds.Min),
+                //                        max = math.min(center + extents, bounds.Max);
+                //
+                //                 center.x += 1;
+                //                 
+                //                 if(math.any(min > bounds.Max) || math.any(max < bounds.Min))
+                //                     continue;
+                //
+                //                 float result = 0;
+                //                 float v      = 0;
+                //                 for (float gy = min.y; gy <= max.y; gy += cellSize)
+                //                 {
+                //                     for (float gz = min.z; gz <= max.z; gz += cellSize)
+                //                     {
+                //                         for (float gx = min.x; gx <= max.x; gx += cellSize)
+                //                         {
+                //                             result += rigi.AddDensityValue(new float3(gx, gy, gz));
+                //                             v++;
+                //                         }
+                //                     }
+                //                 }
+                //                 
+                //                 result /= v;
+                //
+                //                 denPtr[index] += result;
+                //             }
+                //             
+                //         }
+                //     }
+                // }
             }
         }
-
-        public void Execute(int startIndex, int count)
-        {
-            int3 pos = GridUtils.GetGridPos(startIndex, dim);
-            
-            float3 wpos   = (pos + ori);
-
-            var denPtr = (float*)D.GetUnsafePtr();
-            var rigPtr = (PBDCustomColliderInfo*)Rigibodys.GetUnsafeReadOnlyPtr();
-
-            for (int index = startIndex; index < startIndex + count; index++)
-            {
-                float result = 0;
-
-                //密度应该不是这么加的吧
-                for (int i = 0; i < Rigibodys.Length; i++)
-                    result += rigPtr[i].AddDensityValue(wpos);
-
-                denPtr[index] = result;
-
-                wpos.x += 1;
-            }
-        }
-
 
         public void UpdateParams(ref NativeArray<float>                d,
                                  in  float3                            ori,
+                                 in  PBDBounds                         fieldBounds,
                                  ref NativeList<PBDCustomColliderInfo> rigibodys)
         {
-            D         = d;
-            this.ori  = ori;
-            Rigibodys = rigibodys.AsParallelReader();
+            D               = d;
+            this.ori        = ori;
+            windFieldBounds = fieldBounds;
+            Rigibodys       = rigibodys.AsParallelReader();
         }
     }
     
@@ -1281,15 +1581,15 @@ namespace UnityEngine.PBD
                   FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
                   /*Debug = true,*/
                   DisableSafetyChecks = true)]
-    internal unsafe struct WriteVelocityFieldJob : IJobParallelForBatch, IJob
+    internal unsafe struct WriteVelocityFieldJob : IJob
     {
-        [WriteOnly, NativeDisableParallelForRestriction]
+        [NativeDisableParallelForRestriction]
         private NativeArray<float> X;
 
-        [WriteOnly, NativeDisableParallelForRestriction]
+        [NativeDisableParallelForRestriction]
         private NativeArray<float> Y;
 
-        [WriteOnly, NativeDisableParallelForRestriction]
+        [NativeDisableParallelForRestriction]
         private NativeArray<float> Z;
 
         [ReadOnly, NativeDisableParallelForRestriction]
@@ -1297,8 +1597,13 @@ namespace UnityEngine.PBD
 
         [ReadOnly] public int3   dim;
         [ReadOnly] public int3   N;
-        [ReadOnly] private float3 ori;
+        [ReadOnly] public float3 maxRange;
 
+        [ReadOnly] private PBDBounds windFieldBounds;
+        
+        [ReadOnly] private float3    ori;
+        
+        //todo: 八叉树管理力场
         public void Execute()
         {
             var xPtr = (float*)X.GetUnsafePtr();
@@ -1307,69 +1612,148 @@ namespace UnityEngine.PBD
 
             var forcePtr = (PBDForceField*)ForceFields.GetUnsafeReadOnlyPtr();
 
-            for (int y = 0; y < dim.y; y++)
+            
+            for (int i = 0; i < ForceFields.Length; i++)
             {
-                for (int z = 0; z < dim.z; z++)
+                var force  = forcePtr[i];
+                var bounds = force.Bounds;
+                if(!MathematicsUtil.AABBOverlap(bounds, windFieldBounds))
+                    continue;
+
+                //把bounds转到风场格子空间
+                int3 Min = new (math.max(math.floor(bounds.Min - ori), 0.5f)),
+                     Max = new (math.min(math.ceil(bounds.Max  - ori), maxRange));
+
+                // float3 c0   = force.C0 - ori;
+                int3   Size = Max      - Min;
+
+                //大物体用格子中心采样
+                // if (force.IsLargeVolume)
                 {
-                    int3 pos = new int3(0, y, z);
-
-                    float3 wpos = (pos + ori);
-
-                    int index = GridUtils.GetIndex(pos, dim);
-                    int end   = index + dim.x;
-
-                    for (; index < end; index++)
+                    for (int y = Min.y; y <= Max.y; y++)
                     {
-                        float3 result = float3.zero;
-                        
-                        for (int j = 0; j < ForceFields.Length; j++)
-                            result += forcePtr[j].CaculateForce(wpos, float3.zero);
-                        
-                        (xPtr[index], yPtr[index], zPtr[index]) =  (result.x, result.y, result.z);
+                        for (int z = Min.z; z <= Max.z; z++)
+                        {
+                            int3   pos   = new int3(Min.x, y, z);
+                            
+                            float3 wpos  = (pos + ori);
+                            
+                            int index = GridUtils.GetIndex(pos, dim);
+                            int end   = index + Size.x;
+                            
+                            for (; index <= end; index++)
+                            {
+                                var result = force.CaculateForce(wpos, float3.zero);
 
-                        wpos.x += 1;
+                                (xPtr[index], yPtr[index], zPtr[index]) =
+                                    (xPtr[index] + result.x, yPtr[index] + result.y, zPtr[index] + result.z);
+
+                                wpos.x += 1;
+                            }
+                        }
                     }
                 }
-            }
-
-        }
-
-        public void Execute(int startIndex, int count)
-        {
-            int3 pos = GridUtils.GetGridPos(startIndex, dim);
-
-            float3 wpos = (pos + ori);
-            
-            var xPtr = (float*)X.GetUnsafePtr();
-            var yPtr = (float*)Y.GetUnsafePtr();
-            var zPtr = (float*)Z.GetUnsafePtr();
-
-            var forcePtr = (PBDForceField*)ForceFields.GetUnsafeReadOnlyPtr();
-            
-            for (int index = startIndex; index < startIndex + count; index++)
-            {
-                float3 result = float3.zero;
+                //
+                // else
+                // {
+                //     //小物体处理不好 不要了
+                //     if (Size.x * Size.y * Size.z >= 8)
+                //     {
+                //         float  offset = 0.1f * math.cmin(bounds.Size);
+                //         float3 result = float3.zero;
+                //         for (int y = -1; y <= 1; y += 2)
+                //         {
+                //             for (int z = -1; z <= 1; z += 2)
+                //             {
+                //                 for (int x = -1; x <= 1; x += 2)
+                //                 {
+                //                     float3 pos = new float3(x, y, z) * offset + force.C0 ;
+                //                     result += force.CaculateForce(pos, float3.zero);
+                //                 }
+                //             }
+                //         }
+                //         
+                //         result *= 0.125f;
+                //         GridUtils.TrilinearStandardWrite(c0, ref xPtr, ref yPtr, ref zPtr, dim, result);
+                //     }
+                //     else
+                //     {
+                //         float cellSize = 0.1f * math.cmin(bounds.Size);
+                //
+                //         float extent = cellSize * -0.5f + 0.5f;
+                //
+                //         //小物体
+                //         for (int y = Min.y; y <= Max.y; y++)
+                //         {
+                //             for (int z = Min.z; z <= Max.z; z++)
+                //             {
+                //                 int3 pos = new int3(Min.x, y, z);
+                //
+                //                 float3 center = pos + ori;
+                //
+                //                 int index = GridUtils.GetIndex(pos, dim);
+                //                 int end   = index + Size.x;
+                //
+                //                 for (; index <= end; index++)
+                //                 {
+                //                     //小格子内
+                //                     float3 min = math.max(center - extent, bounds.Min),
+                //                            max = math.min(center + extent, bounds.Max);
+                //
+                //                     center.x += 1;
+                //
+                //                     if (math.any(min > bounds.Max) || math.any(max < bounds.Min))
+                //                         continue;
+                //
+                //                     float3 result = float3.zero;
+                //                     float  v      = 0;
+                //                     for (float gy = min.y; gy <= max.y; gy += cellSize)
+                //                     {
+                //                         for (float gz = min.z; gz <= max.z; gz += cellSize)
+                //                         {
+                //                             for (float gx = min.x; gx <= max.x; gx += cellSize)
+                //                             {
+                //                                 float3 f  = force.CaculateForce(new float3(gx, gy, gz), float3.zero);
+                //                                 float  sq = math.lengthsq(f);
+                //                                 if (sq > 0)
+                //                                 {
+                //                                     result += f;
+                //                                     v++;
+                //                                 }
+                //                             }
+                //                         }
+                //                     }
+                //
+                //                     if (v > 0)
+                //                         result /= v;
+                //
+                //                     (xPtr[index], yPtr[index], zPtr[index]) =
+                //                         (xPtr[index] + result.x, yPtr[index] + result.y, zPtr[index] + result.z);
+                //                 }
+                //
+                //             }
+                //         }
+                //     }
+                //
+                // }
                 
-                for (int j = 0; j < ForceFields.Length; j++)
-                    result += forcePtr[j].CaculateForce(wpos, float3.zero);
-
-                (xPtr[index], yPtr[index], zPtr[index]) =  (result.x, result.y, result.z);
-
-                wpos.x  += 1;
             }
+
         }
 
         public void UpdateParams(ref NativeArray<float>        x,
                                  ref NativeArray<float>        y,
                                  ref NativeArray<float>        z,
                                  in  float3                    ori,
+                                 in  PBDBounds                 fieldBounds,
                                  ref NativeList<PBDForceField> forceFields)
         {
-            X              = x;
-            Y              = y;
-            Z              = z;
-            this.ori       = ori;
-            ForceFields    = forceFields.AsParallelReader();
+            X               = x;
+            Y               = y;
+            Z               = z;
+            this.ori        = ori;
+            windFieldBounds = fieldBounds;
+            ForceFields     = forceFields.AsParallelReader();
         }
     }
 }

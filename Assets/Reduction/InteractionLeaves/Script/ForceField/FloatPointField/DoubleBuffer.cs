@@ -1,7 +1,4 @@
-﻿using System;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using Unity.Collections;
+﻿using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -17,50 +14,23 @@ namespace UnityEngine.PBD
     }
 
     [GenerateTestsForBurstCompatibility]
-    public class DoubleBuffer : IDisposable
+    public class DoubleBuffer : DoubleBufferBase<float>
     {
-        private NativeArray<float> dataA;
-
-        private NativeArray<float> dataB;
-
-        private bool m_AisBackBuffer;
-
-        private readonly int3 dimensions;
-        private readonly int3 N;
-
-        private readonly BoundaryType m_boundaryType;
-
-        public int Length
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => dimensions.x * dimensions.y * dimensions.z;
-        }
-
-
-        public int BatchCountX => dimensions.x;
-
-        public int  NSize => N.x * N.y * N.z;
-        
-        public int IteratorX => N.x;
-        public int IteratorY => N.y;
-        public int IteratorZ => N.z;
-
         private AddSourceJob   _addSourceJob;
         private DiffuseLineJob _diffuseLineJob;
         private DiffuseRBGSJob _diffuseRGBS;
-        private AdvectJob      _advectJob;
+        
 
-        private SetBoundaryParallelForJob _setBoundaryParallelForJob;
+        private ForwardAdvectDensityJob _forwardAdvectDensityJob;
+        private ReverseAdvectDensityJob _reverseAdvectDensityJob;
+
+        private SetBoundaryJob _setBoundaryJob;
 
         private WindSimulateSaveJob _saveJob;
-        
-        public bool IsCreated
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => dataA.IsCreated && dataB.IsCreated;
-        }
 
-        public DoubleBuffer(int3 dims, Allocator allocator, BoundaryType type = BoundaryType.Density)
+        private WindFieldClearDataJob<float> _windFieldClearJob;
+
+        public DoubleBuffer(int3 dims, Allocator allocator, BoundaryType type = BoundaryType.Density) : base(dims, allocator, type) 
         {
             dimensions      = dims;
             m_AisBackBuffer = true;
@@ -77,46 +47,33 @@ namespace UnityEngine.PBD
             int4 stride = GridUtils.GetStride(dimensions);
 
             _addSourceJob   = new AddSourceJob() { };
-            _diffuseLineJob = new DiffuseLineJob() { dim = dimensions, N = N, stride   = stride };
-            _diffuseRGBS    = new DiffuseRBGSJob() { dim = dimensions, N = N, stride   = stride };
-            _advectJob      = new AdvectJob() { dim      = dimensions, N = N, stride = stride, maxRange = (float3)dims - 0.5f};
+            _diffuseLineJob = new DiffuseLineJob() { dim = dimensions, N = N, stride = stride };
+            _diffuseRGBS    = new DiffuseRBGSJob() { dim = dimensions, N = N, stride = stride };
 
-            _setBoundaryParallelForJob = new SetBoundaryParallelForJob() { dim = dimensions, };
+            _forwardAdvectDensityJob = new ForwardAdvectDensityJob()
+            {
+                dim      = dimensions,
+                N        = N,
+                stride   = stride,
+                maxRange = (float3)dims - 1.5f
+            };
+            
+            _reverseAdvectDensityJob= new ReverseAdvectDensityJob()
+            {
+                dim      = dimensions,
+                N        = N,
+                stride   = stride,
+                maxRange = (float3)dims - 1.5f
+            };
+
+            _setBoundaryJob = new SetBoundaryJob() { dim = dimensions, N = N, stride = stride };
 
             _saveJob = new WindSimulateSaveJob() { size = size, };
+            
+            _windFieldClearJob = new WindFieldClearDataJob<float>() { size = size };
         }
 
-        public void Swap()
-        {
-            m_AisBackBuffer = !m_AisBackBuffer;
-        }
-
-        private void Swap(ref NativeArray<float> A, ref NativeArray<float> B)
-        {
-            (A, B) = (B, A);
-        }
-        
-        
-        public ref NativeArray<float> back =>  ref m_AisBackBuffer ? ref dataA : ref dataB; 
-        
-
-        public  ref NativeArray<float> front=>  ref m_AisBackBuffer ?  ref dataB : ref  dataA;
-
-        public void Dispose()
-        {
-            if (IsCreated)
-            {
-                dataA.Dispose();
-                dataB.Dispose();
-            }
-        }
-        
-        public void ExchangeBufferWithFront(ref NativeArray<float> source)
-        {
-            Swap(ref front, ref source);
-        }
-
-        public JobHandle AddSource(JobHandle dep, ref NativeArray<float> source, float deltaTime,
+        public override JobHandle AddSource(JobHandle dep, ref NativeArray<float> source, float deltaTime,
                                    ParallelUnit parallelUnit = ParallelUnit.Line)
         {
             ExchangeBufferWithFront(ref source);
@@ -130,17 +87,7 @@ namespace UnityEngine.PBD
                    };
         }
 
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="dep"></param>
-        /// <param name="ratio">密度场为Diffusion，速度场为viscosty</param>
-        /// <param name="deltaTime"></param>
-        /// <param name="iterateCount"></param>
-        /// <param name="parallelUnit"></param>
-        /// <param name="convolution"></param>
-        /// <returns></returns>
-        public JobHandle Diffuse(JobHandle dep, float ratio, float deltaTime, int iterateCount = 10, 
+        public override JobHandle Diffuse(JobHandle dep, float ratio, float deltaTime, int iterateCount = 10, 
                                  ParallelUnit parallelUnit = ParallelUnit.Line,
                                  ConvolutionMethod convolution = ConvolutionMethod.LineSlidingWindow)
         {
@@ -230,41 +177,65 @@ namespace UnityEngine.PBD
             return dep;
         }
 
-        public JobHandle SetBoundaryClamp(JobHandle dep, ref NativeArray<float> data, int b)
+        public override JobHandle SetBoundaryClamp(JobHandle dep, ref NativeArray<float> data, int b)
         {
-            _setBoundaryParallelForJob.UpdateParams(ref data, b);
-            dep = _setBoundaryParallelForJob.ScheduleByRef(6, 1, dep);
+            _setBoundaryJob.UpdateParams(ref data, b);
+            // dep = _setBoundaryJob.ScheduleByRef(6, 1, dep);
+            dep = _setBoundaryJob.ScheduleByRef(dep);
             return dep;
         }
-
-        public JobHandle SetBoundaryClampBack(JobHandle dep)
+        
+        
+        public override JobHandle ClearBack(JobHandle dep)
         {
-            return SetBoundaryClamp(dep, ref back, (int)m_boundaryType);
+            _windFieldClearJob.UpdateParams(ref back);
+            return _windFieldClearJob.ScheduleByRef(dep);
+        }
+
+        public override JobHandle ClearData(JobHandle dep, ref NativeArray<float> data)
+        {
+            _windFieldClearJob.UpdateParams(ref data);
+            return _windFieldClearJob.ScheduleByRef(dep);
         }
 
         //density  速度合并更新了不走这
-        public JobHandle Advect(JobHandle    dep, ref NativeArray<float> u, ref NativeArray<float> v, ref NativeArray<float> w, float deltaTime, 
-                                ParallelUnit parallelUnit = ParallelUnit.Line)
+        public override JobHandle Advect(JobHandle    dep,                ref NativeArray<float> u, ref NativeArray<float> v, ref NativeArray<float> w,
+                                         float        forwardAdvectRatio, float                  deltaTime,
+                                         ParallelUnit parallelUnit = ParallelUnit.Line)
         {
             Swap();
 
-            _advectJob.UpdateParams(ref back, ref front, ref u, ref v, ref w, deltaTime);
+            _forwardAdvectDensityJob.UpdateParams(ref back, ref front, ref u, ref v, ref w, deltaTime, forwardAdvectRatio);
+            _reverseAdvectDensityJob.UpdateParams(ref back, ref front, ref u, ref v, ref w, deltaTime, 1 - forwardAdvectRatio);
+
+            JobHandle reverseAdvect = default,
+                      forwardAdvect = default;
 
             if (parallelUnit == ParallelUnit.Line)
             {
-                dep = _advectJob.ScheduleByRef(NSize, IteratorX, dep);
-
-                dep = SetBoundaryClampBack(dep);
+                if (forwardAdvectRatio < 0.9f)
+                    reverseAdvect = _reverseAdvectDensityJob.ScheduleByRef(NSize, IteratorX, dep);
+                
+                if (forwardAdvectRatio > 0.1f)
+                    forwardAdvect = _forwardAdvectDensityJob.ScheduleByRef(NSize, IteratorX, dep);
             }
             else
             {
-                dep = _advectJob.ScheduleByRef(dep);
+                if (forwardAdvectRatio < 0.9f)
+                    reverseAdvect = _reverseAdvectDensityJob.ScheduleByRef(dep);
+                
+                if (forwardAdvectRatio > 0.1f)
+                    forwardAdvect = _forwardAdvectDensityJob.ScheduleByRef(dep);
+                
             }
+            
+            dep = JobHandle.CombineDependencies(reverseAdvect, forwardAdvect);
+            dep = SetBoundaryClampBack(dep);
             return dep;
         }
 
 
-        public JobHandle Save(JobHandle dep, ref NativeArray<float> data)
+        public override JobHandle Save(JobHandle dep, ref NativeArray<float> data)
         {
             _saveJob.UpdateParams(ref back, ref data);
             

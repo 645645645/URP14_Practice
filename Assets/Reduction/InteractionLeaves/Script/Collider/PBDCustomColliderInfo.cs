@@ -35,6 +35,11 @@ namespace UnityEngine.PBD
 
         public PBDBounds Bounds => new () { Min = boundsMin, Max = boundsMax };
 
+        public bool IsLargeVolume
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => math.lengthsq(boundsMax - boundsMin) > 9;
+        }
         
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public float AddDensityValue(float3 pos)

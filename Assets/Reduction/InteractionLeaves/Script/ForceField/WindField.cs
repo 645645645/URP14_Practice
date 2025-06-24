@@ -21,43 +21,70 @@ namespace UnityEngine.PBD
         Line,
         IJob,
     }
+
+    public enum DataFormat
+    {
+        FloatPoint,
+        FixedPoint,
+    }
     
     public class WindField : MonoBehaviour
     {
-        
-        // 边缘留一格
-        // xzy
-        private DoubleBuffer DensityField;
 
-        private DoubleBuffer VelocityX;
-        private DoubleBuffer VelocityY;
-        private DoubleBuffer VelocityZ;
-
-        //外部使用 back read， forn write
-        public WindFiledExchangeBuffer exchange_Density;
-        public WindFiledExchangeBuffer exchange_VelocityX;
-        public WindFiledExchangeBuffer exchange_VelocityY;
-        public WindFiledExchangeBuffer exchange_VelocityZ;
+        private FloatPointField _floatPointField;
+        private FixedPointFiled _fixedPointFiled;
         
         private int3 dimensions;
         private int3 N;
-        
-        public int Length => dimensions.x * dimensions.y * dimensions.z;
-
-        public int NSize => N.x * N.y * N.z;
-        
-        public int IteratorX => N.x;
 
         public int3 Dim     => dimensions;
         public int3 PublicN => N;
+
+        public ref NativeArray<float> Exchange_Density
+        {
+            get
+            {
+                if (dataFormat == DataFormat.FloatPoint)
+                    return ref _floatPointField.Exchange_Density;
+                return ref _fixedPointFiled.Exchange_Density;
+            }
+        }
+        
+        public ref NativeArray<float> Exchange_VelocityX
+        {
+            get
+            {
+                if (dataFormat == DataFormat.FloatPoint)
+                    return ref _floatPointField.Exchange_VelocityX;
+                return ref _fixedPointFiled.Exchange_VelocityX;
+            }
+        }
+
+        public ref NativeArray<float> Exchange_VelocityY
+        {
+            get
+            {
+                if (dataFormat == DataFormat.FloatPoint)
+                    return ref _floatPointField.Exchange_VelocityY;
+                return ref _fixedPointFiled.Exchange_VelocityY;
+            }
+        }
+
+        public ref NativeArray<float> Exchange_VelocityZ
+        {
+            get
+            {
+                if (dataFormat == DataFormat.FloatPoint)
+                    return ref _floatPointField.Exchange_VelocityZ;
+                return ref _fixedPointFiled.Exchange_VelocityZ;
+            }
+        }
         
         public bool IsCreated
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => exchange_Density.IsCreated   &&
-                   exchange_VelocityX.IsCreated &&
-                   exchange_VelocityY.IsCreated &&
-                   exchange_VelocityZ.IsCreated;
+            get => (dataFormat == DataFormat.FloatPoint && _floatPointField.IsCreated) ||
+                   (dataFormat == DataFormat.FixedPoint && _fixedPointFiled.IsCreated);
         }
 
         private Transform m_windFieldCenter;
@@ -77,18 +104,12 @@ namespace UnityEngine.PBD
         public float3 windFieldMoveDelta => m_selfMoveDeltaOld;
 
         private JobHandle _simlateJobHandle = default;
-
-        private AdvectVelocityJob  _advectVelocityJob;
-        private DivergenceJob      _divergenceJob;
-        private PressureJob        _pressureJob;
-        private CorrectVelocityJob _correctVelocityJob;
-
-        private WriteDensityFieldJob  _writeDentsityJob;
-        private WriteVelocityFieldJob _wirteVelocityJob;
         
-        public void Initialize(int3      dims,
-                               Allocator allocator, in Transform center = null)
+        public void Initialize()
         {
+            (int3 dims, Allocator allocator, Transform center) =
+                (gridSize, Allocator.Persistent, windFieldCenter);
+            
             bool3 noPower2 = !math.ispow2(dims);
             if (math.any(noPower2))
             {
@@ -102,53 +123,35 @@ namespace UnityEngine.PBD
 
             dimensions    = dims;
             N             = dims - 2;
-            
-            DensityField = new DoubleBuffer(dims, allocator, BoundaryType.Density);
-            VelocityX    = new DoubleBuffer(dims, allocator,BoundaryType.VelocityX);
-            VelocityY    = new DoubleBuffer(dims, allocator,BoundaryType.VelocityY);
-            VelocityZ    = new DoubleBuffer(dims, allocator,BoundaryType.VelocityZ);
 
-            int length = dims.x * dims.y * dims.z;
-            
-            exchange_Density   = new WindFiledExchangeBuffer(length, allocator);
-            exchange_VelocityX = new WindFiledExchangeBuffer(length, allocator);
-            exchange_VelocityY = new WindFiledExchangeBuffer(length, allocator);
-            exchange_VelocityZ = new WindFiledExchangeBuffer(length, allocator);
+            int4 stride = GridUtils.GetStride(dims);
 
             m_windFieldCenter = center ? center : transform;
 
             m_lasFramePosition = m_windFieldCenter.position;
 
-            int4 stride = GridUtils.GetStride(dims);
+            switch (dataFormat)
+            {
+                case DataFormat.FloatPoint:
+                    _floatPointField = new FloatPointField();
+                    _floatPointField.Initialize(dims, N, stride, allocator);
+                    break;
 
-            _advectVelocityJob = new AdvectVelocityJob() { 
-                dim      = dims, 
-                N        = N,
-                stride   = stride,
-                maxRange = (float3)dims - 0.5f 
-            };
-
-            _divergenceJob      = new DivergenceJob() { dim      = dims, N = N, stride = stride };
-            _pressureJob        = new PressureJob() { dim        = dims, N = N, stride = stride };
-            _correctVelocityJob = new CorrectVelocityJob() { dim = dims, N = N, stride = stride };
-
-            _writeDentsityJob = new WriteDensityFieldJob() { dim  = dims, N = N };
-            _wirteVelocityJob = new WriteVelocityFieldJob() { dim = dims, N = N };
+                case DataFormat.FixedPoint:
+                    _fixedPointFiled = new FixedPointFiled();
+                    _fixedPointFiled.Initialize(dims, N, stride, allocator);
+                    break;
+            }
         }
 
         public void Dispose()
         {
-            DensityField.Dispose();
-            VelocityX.Dispose();
-            VelocityY.Dispose();
-            VelocityZ.Dispose();
-            exchange_Density.Dispose();
-            exchange_VelocityX.Dispose();
-            exchange_VelocityY.Dispose();
-            exchange_VelocityZ.Dispose();
+            _simlateJobHandle.Complete();
+            _fixedPointFiled?.Dispose();
+            _floatPointField?.Dispose();
         }
 
-        public void UpdateFieldParams(float deltaTime)
+        public void UpdateFieldParams()
         {
             float3 currentPos = m_windFieldCenter.position + centerOffset;
 
@@ -178,208 +181,55 @@ namespace UnityEngine.PBD
             if (IsCreated)
             {
 
-                _wirteVelocityJob.UpdateParams(ref exchange_VelocityX.front, ref exchange_VelocityY.front, ref exchange_VelocityZ.front,
-                                               in m_windFieldOri, ref forceFields);
-                if (useDensityField)
-                {
-                    _writeDentsityJob.UpdateParams(ref exchange_Density.front, in m_windFieldOri, ref colliders);
-
-                    dep = parallelUnit switch
-                          {
-                              ParallelUnit.Line => JobHandle.CombineDependencies(_writeDentsityJob.ScheduleByRef(Length, dimensions.x, dep),
-                                                                                 _wirteVelocityJob.ScheduleByRef(Length, dimensions.x, dep)),
-                              // ParallelUnit.IJob
-                              _ => JobHandle.CombineDependencies(_writeDentsityJob.ScheduleByRef(dep),
-                                                                 _wirteVelocityJob.ScheduleByRef(dep)),
-                          };
-                }
-                else
-                {
-                    dep = parallelUnit switch
-                          {
-                              ParallelUnit.Line => _wirteVelocityJob.ScheduleByRef(Length, dimensions.x, dep),
-                              // ParallelUnit.IJob
-                              _ => _wirteVelocityJob.ScheduleByRef(dep),
-                          };
-                }
+                dep = dataFormat switch
+                      {
+                          DataFormat.FloatPoint => _floatPointField.WriteToFrontBuffer(dep, ref forceFields, ref colliders,
+                                                                                       in m_windFieldOri, in m_windFieldBounds, useDensityField),
+                          
+                          _ => _fixedPointFiled.WriteToFrontBuffer(dep, ref forceFields, ref colliders,
+                                                                   in m_windFieldOri, in m_windFieldBounds, useDensityField),
+                      };
             }
 
             return dep;
         }
+
+
         
         [GenerateTestsForBurstCompatibility]
-        public JobHandle SimulateParallel(JobHandle dep, float deltaTime)
+        public JobHandle Simulate(JobHandle dep, float deltaTime)
         {
             if (IsCreated)
             {
-                dep = VelocityStepParallel(dep, deltaTime);
-                if(useDensityField)
-                    dep = DensityStepParallel(dep, deltaTime);
-            }
-            return dep;
-        }
-
-        [GenerateTestsForBurstCompatibility]
-        public JobHandle OptimizedSimulateParallel(JobHandle dep, float deltaTime)
-        {
-            if (IsCreated)
-            {
-                var velocityStep = VelocityStepParallel(dep, deltaTime);
-
-                if (useDensityField)
+                switch (dataFormat)
                 {
-                    var densityDiffuse = DensityField.AddSource(dep, ref exchange_Density.front, deltaTime, parallelUnit);
-
-                    densityDiffuse = DensityField.Diffuse(densityDiffuse, diffusion, deltaTime, iterationsCountPreFrame,
-                                                          parallelUnit, convolutionMethod);
-
-                    dep = JobHandle.CombineDependencies(velocityStep, densityDiffuse);
-
-                    //密度平流之前的部分不需要等速度迭代完
-                    dep = DensityField.Advect(dep, ref VelocityX.back, ref VelocityY.back, ref VelocityZ.back, deltaTime, parallelUnit);
-                }
-                else
-                {
-                    dep = velocityStep;
+                    case DataFormat.FloatPoint:
+                        dep = _floatPointField.Simulate(dep, deltaTime, vicosity,
+                                                                diffusion, forwardAdvectRatio,
+                                                                iterationsCountPreFrame, useDensityField, 
+                                                                parallelUnit, convolutionMethod);
+                        break;
+                    case DataFormat.FixedPoint:
+                        dep = _fixedPointFiled.Simulate(dep, new VInt(deltaTime),new VInt(vicosity), 
+                                                                new VInt(diffusion), new VInt(forwardAdvectRatio), 
+                                                                iterationsCountPreFrame, useDensityField, 
+                                                                parallelUnit, convolutionMethod);
+                        break;
                 }
             }
-
             return dep;
         }
 
         public JobHandle SaveToBack(JobHandle dep)
         {
-            _simlateJobHandle = JobHandle.CombineDependencies(VelocityX.Save(dep, ref exchange_VelocityX.back),
-                                                              VelocityY.Save(dep, ref exchange_VelocityY.back),
-                                                              VelocityZ.Save(dep, ref exchange_VelocityZ.back));
-            if (useDensityField)
-            {
-                dep = DensityField.Save(dep, ref exchange_Density.back);
+            _simlateJobHandle = dataFormat switch
+                                {
+                                    DataFormat.FloatPoint => _simlateJobHandle = _floatPointField.SaveToBack(dep, useDensityField),
 
-                _simlateJobHandle = JobHandle.CombineDependencies(_simlateJobHandle, dep);
-            }
+                                    _ => _simlateJobHandle = _fixedPointFiled.SaveToBack(dep, useDensityField),
+                                };
 
             return _simlateJobHandle;
-        }
-        
-
-        [GenerateTestsForBurstCompatibility]
-        private JobHandle DensityStepParallel(JobHandle dep, float deltaTime)
-        {
-            dep = DensityField.AddSource(dep, ref exchange_Density.front, deltaTime, parallelUnit);
-
-            dep = DensityField.Diffuse(dep, diffusion, deltaTime, iterationsCountPreFrame,
-                                       parallelUnit, convolutionMethod);
-            
-            dep = DensityField.Advect(dep, ref VelocityX.back, ref VelocityY.back, ref VelocityZ.back, deltaTime, parallelUnit);
-
-            
-            return dep;
-        }
-
-        [GenerateTestsForBurstCompatibility]
-        private JobHandle VelocityStepParallel(JobHandle dep, float deltaTime)
-        {
-            var addSourceX = VelocityX.AddSource(dep, ref exchange_VelocityX.front, deltaTime, parallelUnit);
-            var addSourceY = VelocityY.AddSource(dep, ref exchange_VelocityY.front, deltaTime, parallelUnit);
-            var addSourceZ = VelocityZ.AddSource(dep, ref exchange_VelocityZ.front, deltaTime, parallelUnit);
-
-            var diffuseXJobHandle = VelocityX.Diffuse(addSourceX, vicosity, deltaTime, iterationsCountPreFrame,
-                                                      parallelUnit, convolutionMethod);
-            var diffuseYJobHandle = VelocityY.Diffuse(addSourceY, vicosity, deltaTime, iterationsCountPreFrame,
-                                                      parallelUnit, convolutionMethod);
-            var diffuseZJobHandle = VelocityZ.Diffuse(addSourceZ, vicosity, deltaTime, iterationsCountPreFrame,
-                                                      parallelUnit, convolutionMethod);
-
-            // dep = JobHandle.CombineDependencies(addSourceX, addSourceY, addSourceZ);
-            
-            dep = JobHandle.CombineDependencies(diffuseXJobHandle, diffuseYJobHandle, diffuseZJobHandle);
-            
-            
-            dep = VelocityProject(dep, iterationsCountPreFrame);
-            
-            
-            VelocityX.Swap(); VelocityY.Swap(); VelocityZ.Swap();
-
-            _advectVelocityJob.UpdateParams(ref VelocityX.back, ref VelocityY.back, ref VelocityZ.back,
-                                            ref VelocityX.front, ref VelocityY.front, ref VelocityZ.front, deltaTime);
-
-            if (parallelUnit == ParallelUnit.Line)
-            {
-                dep = _advectVelocityJob.ScheduleByRef(NSize, IteratorX, dep);
-                dep = JobHandle.CombineDependencies(VelocityX.SetBoundaryClampBack(dep),
-                                                    VelocityY.SetBoundaryClampBack(dep),
-                                                    VelocityZ.SetBoundaryClampBack(dep));
-            }
-            else
-            {
-                dep = _advectVelocityJob.ScheduleByRef(dep);
-            }
-
-            dep = VelocityProject(dep, iterationsCountPreFrame);
-            
-            return dep;
-        }
-
-        [GenerateTestsForBurstCompatibility]
-        JobHandle VelocityProject(JobHandle dep, int iterateCount = 10)
-        {
-            ref NativeArray<float> pressure   = ref VelocityX.front,//
-                       divergence = ref VelocityZ.front;
-            
-            
-            _divergenceJob.UpdateParams(ref pressure, ref divergence,
-                                        ref VelocityX.back, ref VelocityY.back, ref VelocityZ.back);
-
-            _pressureJob.UpdateParams(ref pressure, ref divergence, iterateCount);
-            
-            _correctVelocityJob.UpdateParams(ref pressure, ref VelocityX.back, ref VelocityY.back, ref VelocityZ.back);
-            
-            if (parallelUnit == ParallelUnit.Line)
-            {
-                //divergence
-                var divergenceJobHandle = _divergenceJob.ScheduleByRef(NSize, IteratorX, dep);
-                var setBndDivJobHandle  = VelocityX.SetBoundaryClamp(divergenceJobHandle, ref pressure, 0);
-                var setBndPJobHandle    = VelocityY.SetBoundaryClamp(divergenceJobHandle, ref divergence, 0);
-
-                dep = JobHandle.CombineDependencies(setBndDivJobHandle, setBndPJobHandle);
-                
-                //pressure
-                for (int i = 0; i < iterateCount; i++)
-                {
-                    _pressureJob.IsRedPhase = true;
-
-                    dep = _pressureJob.ScheduleByRef(NSize, IteratorX, dep);
-                
-                
-                    _pressureJob.IsRedPhase = false;
-
-                    dep = _pressureJob.ScheduleByRef(NSize, IteratorX, dep);
-                
-                    dep = VelocityX.SetBoundaryClamp(dep, ref pressure, 0);
-                }
-                
-                //update Velocity
-                dep = _correctVelocityJob.ScheduleByRef(NSize, IteratorX, dep);
-
-                dep = JobHandle.CombineDependencies(VelocityX.SetBoundaryClampBack(dep),
-                                                    VelocityY.SetBoundaryClampBack(dep),
-                                                    VelocityZ.SetBoundaryClampBack(dep));
-            }
-            else
-            {
-                dep = _divergenceJob.ScheduleByRef(dep);
-                dep = _pressureJob.ScheduleByRef(dep);
-                dep = _correctVelocityJob.ScheduleByRef(dep);
-            }
-
-            return dep;
-        }
-
-
-        private void Start()
-        {
-            Initialize(gridSize, Allocator.Persistent, windFieldCenter);
         }
 
 
@@ -401,14 +251,19 @@ namespace UnityEngine.PBD
         
         public  Vector3 centerOffset = new Vector3(0.5f, 0.5f, 0.5f);
 
+        [_ReadOnlyInPlayMode] public DataFormat dataFormat = DataFormat.FloatPoint;
+
         public ParallelUnit parallelUnit = ParallelUnit.Line;
 
         public ConvolutionMethod convolutionMethod = ConvolutionMethod.LineSequence;
 
         public bool useDensityField = false;
-        
+
+        [Range(0, 1)] public float forwardAdvectRatio = 0f;
 
 #if UNITY_EDITOR
+        
+        [Space, Header("DebugDraw")]
         public bool drawPos;
 
         public bool drawDir;
@@ -429,10 +284,10 @@ namespace UnityEngine.PBD
 
             _simlateJobHandle.Complete();
             
-            ref NativeArray<float> D = ref exchange_Density.back,
-                                   X = ref exchange_VelocityX.back,
-                                   Z = ref exchange_VelocityZ.back,
-                                   Y = ref exchange_VelocityY.back;
+            ref NativeArray<float> D = ref Exchange_Density,
+                                   X = ref Exchange_VelocityX,
+                                   Z = ref Exchange_VelocityZ,
+                                   Y = ref Exchange_VelocityY;
 
             float3    ori    = m_windFieldOri;
 
