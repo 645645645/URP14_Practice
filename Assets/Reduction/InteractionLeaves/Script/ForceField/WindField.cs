@@ -134,12 +134,12 @@ namespace UnityEngine.PBD
             {
                 case DataFormat.FloatPoint:
                     _floatPointField = new FloatPointField();
-                    _floatPointField.Initialize(dims, N, stride, allocator);
+                    _floatPointField.Initialize(dims, N, stride, allocator, overSanpling);
                     break;
 
                 case DataFormat.FixedPoint:
                     _fixedPointFiled = new FixedPointFiled();
-                    _fixedPointFiled.Initialize(dims, N, stride, allocator);
+                    _fixedPointFiled.Initialize(dims, N, stride, allocator, overSanpling);
                     break;
             }
         }
@@ -184,10 +184,10 @@ namespace UnityEngine.PBD
                 dep = dataFormat switch
                       {
                           DataFormat.FloatPoint => _floatPointField.WriteToFrontBuffer(dep, ref forceFields, ref colliders,
-                                                                                       in m_windFieldOri, in m_windFieldBounds, useDensityField),
+                                                                                       in m_windFieldOri, in m_windFieldBounds, useDensityField, overSanpling),
                           
                           _ => _fixedPointFiled.WriteToFrontBuffer(dep, ref forceFields, ref colliders,
-                                                                   in m_windFieldOri, in m_windFieldBounds, useDensityField),
+                                                                   in m_windFieldOri, in m_windFieldBounds, useDensityField, overSanpling),
                       };
             }
 
@@ -258,6 +258,8 @@ namespace UnityEngine.PBD
         public ConvolutionMethod convolutionMethod = ConvolutionMethod.LineSequence;
 
         public bool useDensityField = false;
+
+        [_ReadOnlyInPlayMode] public bool overSanpling = true;
 
         [Range(0, 1)] public float forwardAdvectRatio = 0f;
 

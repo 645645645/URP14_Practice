@@ -1475,11 +1475,18 @@ namespace UnityEngine.PBD
 
         [ReadOnly] private PBDBounds windFieldBounds;
         [ReadOnly] private float3    ori;
+        [ReadOnly] public  bool      super;
 
         public void Execute()
         {
             var denPtr = (VInt*)D.GetUnsafePtr();
             var rigPtr = (PBDCustomColliderInfo*)Rigibodys.GetUnsafeReadOnlyPtr();
+
+            int3   dim      = math.select(this.dim, this.dim * 2, super);
+            float3 maxRange = new float3(dim) - 1f;
+            float3 ori      = math.select(this.ori, this.ori - 0.25f, super);
+            float  scaleInv = math.select(1, 2, super);
+            float  scale    = 1 / scaleInv;
 
             for (int i = 0; i < Rigibodys.Length; i++)
             {
@@ -1488,8 +1495,10 @@ namespace UnityEngine.PBD
                 if (!MathematicsUtil.AABBOverlap(bounds, windFieldBounds))
                     continue;
 
-                int3 Min = new(math.max(math.floor(bounds.Min - ori), 0)),
-                     Max = new(math.min(math.ceil(bounds.Max  - ori), maxRange));
+                int3 Min = new (math.max(math.floor((bounds.Min - ori) * scaleInv), 0)),
+                     Max = new (math.min(math.ceil((bounds.Max  - ori) * scaleInv), maxRange));
+                
+                int3 Size = Max - Min;
 
                 for (int y = Min.y; y <= Max.y; y++)
                 {
@@ -1497,10 +1506,10 @@ namespace UnityEngine.PBD
                     {
                         int3 pos = new int3(Min.x, y, z);
 
-                        float3 wpos = (pos + ori);
+                        float3 wpos  = new float3(pos) * scale + ori;
 
                         int index = GridUtils.GetIndex(pos, dim);
-                        int end   = index + (Max.x - Min.x);
+                        int end   = index + Size.x;
 
                         for (; index <= end; index++)
                         {
@@ -1508,7 +1517,7 @@ namespace UnityEngine.PBD
 
                             denPtr[index] += new VInt(result);
 
-                            wpos.x += 1;
+                            wpos.x += scale;
                         }
                     }
                 }
@@ -1553,6 +1562,7 @@ namespace UnityEngine.PBD
         [ReadOnly] private PBDBounds windFieldBounds;
 
         [ReadOnly] private float3 ori;
+        [ReadOnly] public  bool   super;
         
         //todo: 八叉树管理力场
         public void Execute()
@@ -1563,6 +1573,11 @@ namespace UnityEngine.PBD
 
             var forcePtr = (PBDForceField*)ForceFields.GetUnsafeReadOnlyPtr();
 
+            int3   dim      = math.select(this.dim, this.dim * 2, super);
+            float3 maxRange = new float3(dim) - 1f;
+            float3 ori      = math.select(this.ori, this.ori - 0.25f, super);
+            float  scaleInv = math.select(1, 2, super);
+            float  scale    = 1 / scaleInv;
             
             for (int i = 0; i < ForceFields.Length; i++)
             {
@@ -1571,9 +1586,10 @@ namespace UnityEngine.PBD
                 if(!MathematicsUtil.AABBOverlap(bounds, windFieldBounds))
                     continue;
 
-                int3 Min = new(math.max(math.floor(bounds.Min - ori), 0)),
-                     Max = new(math.min(math.ceil(bounds.Max  - ori), maxRange));
+                int3 Min = new (math.max(math.floor((bounds.Min - ori) * scaleInv), 0)),
+                     Max = new (math.min(math.ceil((bounds.Max  - ori) * scaleInv), maxRange));
 
+                int3 Size = Max - Min;
 
                 for (int y = Min.y; y <= Max.y; y++)
                 {
@@ -1581,10 +1597,10 @@ namespace UnityEngine.PBD
                     {
                         int3 pos = new int3(Min.x, y, z);
 
-                        float3 wpos = (pos + ori);
+                        float3 wpos = new float3(pos) * scale + ori;
 
                         int index = GridUtils.GetIndex(pos, dim);
-                        int end   = index + (Max.x - Min.x);
+                        int end   = index + Size.x;
 
                         for (; index <= end; index++)
                         {
@@ -1595,7 +1611,7 @@ namespace UnityEngine.PBD
                             (xPtr[index], yPtr[index], zPtr[index]) =
                                 (xPtr[index] + fixedResult.x, yPtr[index] + fixedResult.y, zPtr[index] + fixedResult.z);
 
-                            wpos.x += 1;
+                            wpos.x += scale;
                         }
                     }
                 }
@@ -1616,6 +1632,77 @@ namespace UnityEngine.PBD
             this.ori        = ori;
             windFieldBounds = fieldBounds;
             ForceFields     = forceFields.AsParallelReader();
+        }
+    }
+    
+    
+        [BurstCompile(OptimizeFor = OptimizeFor.Performance, FloatMode = FloatMode.Fast, 
+                  FloatPrecision = FloatPrecision.Low, CompileSynchronously = true,
+                  /*Debug = true,*/
+                  DisableSafetyChecks = true)]
+    internal unsafe struct DownSampleJobFixed : IJob
+    {
+        [WriteOnly, NativeDisableParallelForRestriction]
+        private NativeArray<VInt> Data;
+
+        [ReadOnly, NativeDisableParallelForRestriction]
+        private NativeArray<VInt>.ReadOnly Super;
+
+        [ReadOnly] public int3 dim;
+
+        public void Execute()
+        {
+            var destPtr = (VInt*)Data.GetUnsafePtr();
+            var srcPtr  = (VInt*)Super.GetUnsafeReadOnlyPtr();
+
+            // var stride = GridUtils.GetStride(dim);
+            
+            var superDim    = dim * 2;
+            var superStride = GridUtils.GetStride(superDim);
+
+            for (int y = 0; y < dim.y; y++)
+            {
+                for (int z = 0; z < dim.z; z++)
+                {
+                    int3 pos   = new int3(0, y, z);
+                    int  index = GridUtils.GetIndex(pos, dim);
+                    int  end   = index + dim.x;
+                    
+                    int3 min    = pos * 2;
+                    int  sIndex = GridUtils.GetIndex(min, superDim);
+
+                    for (; index < end; index++, sIndex += 2)
+                    {
+                        
+                        VInt result = 0;
+                        for (int sy = 0; sy <= 1; sy++)
+                        {
+                            for (int sz = 0; sz <= 1; sz++)
+                            {
+                                for (int sx = 0; sx <= 1; sx++)
+                                {
+                                    int sampleIndex = math.dot(superStride.xyz, new int3(sx, sy, sz)) + sIndex;
+                                    result += srcPtr[sampleIndex];
+                                }
+                            }
+                        }
+
+                        result /= 8;
+
+                        destPtr[index] = result;
+                        
+                    }
+                }
+            }
+        }
+
+        public void UpdateParams(ref NativeArray<VInt> data,
+                                 ref NativeArray<VInt> super,
+                                 in  int3              dim)
+        {
+            Data     = data;
+            Super    = super.AsReadOnly();
+            this.dim = dim;
         }
     }
 }

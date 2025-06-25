@@ -10,11 +10,17 @@ namespace UnityEngine.PBD
     public class ExchangeBuffer
     {
         private NativeArray<float> dataA;
-        private NativeArray<float>  dataB;
+        private NativeArray<float> dataB;
+
+        private NativeArray<float> dataC;// overSampling
         
         public ref NativeArray<float> back =>  ref dataA;//风场输出到外部 
         
-        public ref NativeArray<float> front =>  ref dataB;//外部输入到风场
+        public ref NativeArray<float> front => ref dataB;//外部输入到风场
+
+        public ref NativeArray<float> super => ref dataC;
+
+        private DownSampleJob _downSampleJob;
         
         public bool IsCreated
         {
@@ -22,10 +28,16 @@ namespace UnityEngine.PBD
             get => dataA.IsCreated && dataB.IsCreated;
         }
 
-        public ExchangeBuffer(int length, Allocator allocator)
+        public ExchangeBuffer(int length, Allocator allocator,  bool overSampling = false)
         {
-            dataA = new NativeArray<float>(length, allocator, NativeArrayOptions.ClearMemory);
-            dataB = new NativeArray<float>(length, allocator, NativeArrayOptions.ClearMemory);
+            dataA = new NativeArray<float>(length, allocator, NativeArrayOptions.UninitializedMemory);
+            dataB = new NativeArray<float>(length, allocator, NativeArrayOptions.UninitializedMemory);
+            
+            if (overSampling)
+            {
+                dataC          = new NativeArray<float>(length * 8, allocator, NativeArrayOptions.UninitializedMemory);
+                _downSampleJob = new DownSampleJob();
+            }
         }
 
         public void Dispose()
@@ -34,7 +46,21 @@ namespace UnityEngine.PBD
             {
                 dataA.Dispose();
                 dataB.Dispose();
+                
+                if (dataC.IsCreated)
+                    dataC.Dispose();
             }
+        }
+
+        public JobHandle DownSample(JobHandle dep, in int3 dim)
+        {
+            if(dataC.IsCreated)
+            {
+                _downSampleJob.UpdateParams(ref front, ref super, in dim);
+                dep = _downSampleJob.ScheduleByRef(dep);
+            }
+
+            return dep;
         }
     }
 }

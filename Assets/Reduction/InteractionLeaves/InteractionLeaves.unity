@@ -1911,6 +1911,7 @@ MonoBehaviour:
   parallelUnit: 1
   convolutionMethod: 2
   useDensityField: 0
+  overSanpling: 0
   forwardAdvectRatio: 0.5
   drawPos: 0
   drawDir: 0
@@ -2875,7 +2876,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_ForceType: 3
-  m_Force: {x: 1, y: 1, z: 1}
+  m_Force: {x: 1.5, y: 1.5, z: 1}
   m_Center: {x: 0, y: 0, z: 0}
   m_Radius: 0.87
   m_ForceRatio: 0.1

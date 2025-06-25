@@ -11,9 +11,14 @@ namespace UnityEngine.PBD
         private NativeArray<float> dataA;
         private NativeArray<VInt>  dataB;
         
+        private NativeArray<VInt> dataC;// overSampling
+        
         public ref NativeArray<float> back =>  ref dataA; //外部输入到风场
         public ref NativeArray<VInt>  front =>  ref dataB; //外部输入到风场
 
+        public ref NativeArray<VInt> super => ref dataC;
+        
+        private DownSampleJobFixed _downSampleJob;
         
         public bool IsCreated
         {
@@ -21,10 +26,16 @@ namespace UnityEngine.PBD
             get => dataA.IsCreated && dataB.IsCreated;
         }
 
-        public ExchangeBufferFixed(int length, Allocator allocator)
+        public ExchangeBufferFixed(int length, Allocator allocator,  bool overSampling = false)
         {
-            dataA = new NativeArray<float>(length, allocator, NativeArrayOptions.ClearMemory);
-            dataB = new NativeArray<VInt>(length, allocator, NativeArrayOptions.ClearMemory);
+            dataA = new NativeArray<float>(length, allocator, NativeArrayOptions.UninitializedMemory);
+            dataB = new NativeArray<VInt>(length, allocator, NativeArrayOptions.UninitializedMemory);
+            
+            if (overSampling)
+            {
+                dataC          = new NativeArray<VInt>(length * 8, allocator, NativeArrayOptions.UninitializedMemory);
+                _downSampleJob = new DownSampleJobFixed();
+            }
         }
 
         public void Dispose()
@@ -33,7 +44,21 @@ namespace UnityEngine.PBD
             {
                 dataA.Dispose();
                 dataB.Dispose();
+                
+                if (dataC.IsCreated)
+                    dataC.Dispose();
             }
+        }
+        
+        public JobHandle DownSample(JobHandle dep, in int3 dim)
+        {
+            if(dataC.IsCreated)
+            {
+                _downSampleJob.UpdateParams(ref front, ref super, in dim);
+                dep = _downSampleJob.ScheduleByRef(dep);
+            }
+
+            return dep;
         }
     }
 }

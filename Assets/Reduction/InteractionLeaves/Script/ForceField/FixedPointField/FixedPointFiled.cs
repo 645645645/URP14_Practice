@@ -24,7 +24,7 @@ namespace UnityEngine.PBD
         private PressureJobFixed              _pressureJob;
         private CorrectVelocityJobFixed       _correctVelocityJob;
         
-        private WriteDensityFieldJobFixed  _writeDentsityJob;
+        private WriteDensityFieldJobFixed  _writeDensityJob;
         private WriteVelocityFieldJobFixed _writeVelocityJob;
 
         public ref NativeArray<float> Exchange_Density => ref exchange_Density.back;
@@ -66,7 +66,7 @@ namespace UnityEngine.PBD
             exchange_VelocityZ.Dispose();
         }
 
-        public void Initialize(int3 dims, int3 n, int4 stride, Allocator allocator)
+        public void Initialize(int3 dims, int3 n, int4 stride, Allocator allocator, bool overSampling = false)
         {
             dimensions = dims;
             this.N     = n;
@@ -78,10 +78,10 @@ namespace UnityEngine.PBD
             VelocityY    = new DoubleBufferFixed(dims, allocator,BoundaryType.VelocityY);
             VelocityZ    = new DoubleBufferFixed(dims, allocator,BoundaryType.VelocityZ);
             
-            exchange_Density   = new ExchangeBufferFixed(length, allocator);
-            exchange_VelocityX = new ExchangeBufferFixed(length, allocator);
-            exchange_VelocityY = new ExchangeBufferFixed(length, allocator);
-            exchange_VelocityZ = new ExchangeBufferFixed(length, allocator);
+            exchange_Density   = new ExchangeBufferFixed(length, allocator, overSampling);
+            exchange_VelocityX = new ExchangeBufferFixed(length, allocator, overSampling);
+            exchange_VelocityY = new ExchangeBufferFixed(length, allocator, overSampling);
+            exchange_VelocityZ = new ExchangeBufferFixed(length, allocator, overSampling);
 
             _forwardAdvectVelocityJob = new ForwardAdvectVelocityJobFixed()
             {
@@ -103,18 +103,20 @@ namespace UnityEngine.PBD
             _pressureJob        = new PressureJobFixed() { dim        = dims, N = N, stride = stride };
             _correctVelocityJob = new CorrectVelocityJobFixed() { dim = dims, N = N, stride = stride };
 
-            _writeDentsityJob = new WriteDensityFieldJobFixed()
+            _writeDensityJob = new WriteDensityFieldJobFixed()
             {
                 dim  = dims, 
-                N = N, 
-                maxRange = (float3)dims - 1f
+                // N = N, 
+                // maxRange = (float3)dims - 1f,
+                super    = overSampling,
             };
 
             _writeVelocityJob = new WriteVelocityFieldJobFixed()
             {
                 dim      = dims,
-                N        = N,
-                maxRange = (float3)dims - 1f,
+                // N        = N,
+                // maxRange = (float3)dims - 1f,
+                super    = overSampling,
             };
         }
 
@@ -123,26 +125,81 @@ namespace UnityEngine.PBD
                                             ref NativeList<PBDCustomColliderInfo> colliders,
                                             in  float3                            windFieldOri,
                                             in  PBDBounds                         windFieldBounds,
-                                            bool                                  useDensityField)
+                                            bool                                  useDensityField,
+                                            bool                                  superSample)
         {
             
-            _writeVelocityJob.UpdateParams(ref exchange_VelocityX.front, ref exchange_VelocityY.front, ref exchange_VelocityZ.front,
-                                           in windFieldOri, in windFieldBounds, ref forceFields);
+            dep = JobHandle.CombineDependencies(WriteDensity(dep, ref forceFields, ref colliders, in windFieldOri, in windFieldBounds, useDensityField, superSample),
+                                                WriteVelocity(dep, ref forceFields, ref colliders, in windFieldOri, in windFieldBounds, useDensityField, superSample));
 
-            dep = JobHandle.CombineDependencies(VelocityX.ClearData(dep, ref exchange_VelocityX.front),
-                                                VelocityY.ClearData(dep, ref exchange_VelocityY.front),
-                                                VelocityZ.ClearData(dep, ref exchange_VelocityZ.front));
-            if (useDensityField)
+            return dep;
+        }
+
+        private JobHandle WriteDensity(JobHandle                             dep,
+                                       ref NativeList<PBDForceField>         forceFields,
+                                       ref NativeList<PBDCustomColliderInfo> colliders,
+                                       in  float3                            windFieldOri,
+                                       in  PBDBounds                         windFieldBounds,
+                                       bool                                  useDensityField,
+                                       bool                                  superSample)
+        {
+            if (!useDensityField)
+                return dep;
+            
+            if (superSample)
             {
-                _writeDentsityJob.UpdateParams(ref exchange_Density.front, in windFieldOri, in windFieldBounds, ref colliders);
-                
-                dep = DensityField.ClearData(dep, ref exchange_Density.front);
+                _writeDensityJob.UpdateParams(ref exchange_Density.super, in windFieldOri, in windFieldBounds, ref colliders);
 
-                dep = JobHandle.CombineDependencies(_writeDentsityJob.ScheduleByRef(dep),
-                                                    _writeVelocityJob.ScheduleByRef(dep));
+                dep = DensityField.ClearData(dep, ref exchange_Density.super);
+                
+                dep = _writeDensityJob.ScheduleByRef(dep);
+                
+                dep = exchange_Density.DownSample(dep, dimensions);
             }
             else
             {
+                _writeDensityJob.UpdateParams(ref exchange_Density.front, in windFieldOri, in windFieldBounds, ref colliders);
+
+                dep = DensityField.ClearData(dep, ref exchange_Density.front);
+                
+                dep = _writeDensityJob.ScheduleByRef(dep);
+            }
+
+            return dep;
+        }
+        
+        private JobHandle WriteVelocity(JobHandle                             dep,
+                                        ref NativeList<PBDForceField>         forceFields,
+                                        ref NativeList<PBDCustomColliderInfo> colliders,
+                                        in  float3                            windFieldOri,
+                                        in  PBDBounds                         windFieldBounds,
+                                        bool                                  useDensityField,
+                                        bool                                  superSample)
+        {
+            if (superSample)
+            {
+                _writeVelocityJob.UpdateParams(ref exchange_VelocityX.super, ref exchange_VelocityY.super, ref exchange_VelocityZ.super,
+                                               in windFieldOri, in windFieldBounds, ref forceFields);
+
+                dep = JobHandle.CombineDependencies(VelocityX.ClearData(dep, ref exchange_VelocityX.super),
+                                                    VelocityY.ClearData(dep, ref exchange_VelocityY.super),
+                                                    VelocityZ.ClearData(dep, ref exchange_VelocityZ.super));
+
+                dep = _writeVelocityJob.ScheduleByRef(dep);
+
+                dep = JobHandle.CombineDependencies(exchange_VelocityX.DownSample(dep, dimensions),
+                                                    exchange_VelocityY.DownSample(dep, dimensions),
+                                                    exchange_VelocityZ.DownSample(dep, dimensions));
+            }
+            else
+            {
+                _writeVelocityJob.UpdateParams(ref exchange_VelocityX.front, ref exchange_VelocityY.front, ref exchange_VelocityZ.front,
+                                               in windFieldOri, in windFieldBounds, ref forceFields);
+
+                dep = JobHandle.CombineDependencies(VelocityX.ClearData(dep, ref exchange_VelocityX.front),
+                                                    VelocityY.ClearData(dep, ref exchange_VelocityY.front),
+                                                    VelocityZ.ClearData(dep, ref exchange_VelocityZ.front));
+
                 dep = _writeVelocityJob.ScheduleByRef(dep);
             }
 

@@ -7,7 +7,7 @@ namespace UnityEngine.PBD
 {
     internal interface IFPointFieldBase<T> : IDisposable where T : unmanaged
     {
-        void Initialize(int3 dims, int3 n, int4 stride, Allocator allocator);
+        void Initialize(int3 dims, int3 n, int4 stride, Allocator allocator, bool overSampling = false);
 
 
         public JobHandle WriteToFrontBuffer(JobHandle                             dep,
@@ -15,7 +15,8 @@ namespace UnityEngine.PBD
                                             ref NativeList<PBDCustomColliderInfo> colliders,
                                             in  float3                            windFieldOri,
                                             in  PBDBounds                         windFieldBounds,
-                                            bool                                  useDensityField);
+                                            bool                                  useDensityField,
+                                            bool                                  superSample);
 
         JobHandle Simulate(JobHandle    dep,
                                    T            deltaTime,               T                 vicosity,

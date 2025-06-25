@@ -62,7 +62,7 @@ namespace UnityEngine.PBD
 
             _saveJob = new WindSimulateSaveJobFixed() { size = size, };
 
-            _windFieldClearJob = new WindFieldClearDataJob<VInt>() { size = size };
+            _windFieldClearJob = new WindFieldClearDataJob<VInt>();
         }
 
         public override JobHandle AddSource(JobHandle    dep, ref NativeArray<VInt> source, VInt deltaTime,
