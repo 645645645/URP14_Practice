@@ -23,121 +23,39 @@ Material:
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
-    - _BaseMap:
-        m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
-    - _BumpMap:
-        m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
     - _CookieTex:
         m_Texture: {fileID: 2800000, guid: a646378029d6b1949b57460a98196028, type: 3}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
-    - _DetailAlbedoMap:
-        m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
-    - _DetailMask:
-        m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
-    - _DetailNormalMap:
-        m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
-    - _EmissionMap:
-        m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MainTex:
         m_Texture: {fileID: 2800000, guid: 7fbe5b63da83ea24bad3f1c09615b326, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
-    - _MetallicGlossMap:
-        m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
-    - _OcclusionMap:
-        m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
-    - _ParallaxMap:
-        m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
     - _ParallexTex:
         m_Texture: {fileID: 2800000, guid: f528d39e9f2bb814aaa1cfda448d7639, type: 3}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
-    - _SpecGlossMap:
-        m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _posm_ShadowMap:
         m_Texture: {fileID: 2800000, guid: 653ed6ee33803284493c4bfb6c70680a, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
-    - unity_Lightmaps:
-        m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
-    - unity_LightmapsInd:
-        m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
-    - unity_ShadowMasks:
-        m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _AlphaClip: 0
-    - _Blend: 0
-    - _BumpScale: 1
-    - _ClearCoatMask: 0
-    - _ClearCoatSmoothness: 0
     - _CookieMoveSpeed1: -0.18
     - _CookieMoveSpeed2: -0.06
     - _CookieMoveSpeed3: -0.24
-    - _Cull: 2
-    - _Cutoff: 0.5
     - _DepthBias: 0
-    - _DetailAlbedoMapScale: 1
-    - _DetailNormalMapScale: 1
-    - _DstBlend: 0
-    - _EnvironmentReflections: 1
-    - _GlossMapScale: 0
-    - _Glossiness: 0
-    - _GlossyReflections: 0
-    - _Metallic: 0
-    - _OcclusionStrength: 1
-    - _Parallax: 0.005
     - _Parallex: 0.56
-    - _QueueOffset: 0
-    - _ReceiveShadows: 1
     - _Rim: 3.12
-    - _Smoothness: 0.5
-    - _SmoothnessTextureChannel: 0
-    - _SpecularHighlights: 1
-    - _SrcBlend: 1
-    - _Surface: 0
-    - _WorkflowMode: 1
-    - _ZWrite: 1
     - _posm_SampleBias: 0.001
     m_Colors:
-    - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
-    - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _CookieIntensity: {r: 1, g: 1, b: 1.12, a: 0}
     - _CookieOffset: {r: 0, g: 0.03, b: 0, a: 0}
     - _CookieOffset2: {r: -0.23, g: 0.58, b: 0.19, a: -0.27}
-    - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _EyeRight: {r: 0.98858, g: -0.00998, b: 0.15038, a: 0}
     - _EyeUp: {r: 0.00204, g: 0.9986, b: 0.05288, a: 0}
     - _NN4AmbientTint: {r: 1, g: 1, b: 1, a: 0}
     - _NN4Char_LightColor1: {r: 0.31, g: 0.31, b: 0.31, a: 0}
-    - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
     - _posm_Parameters: {r: 1, g: 1000, b: 0.00098, a: 0.00391}
     - _posm_ShadowCamera_Parameter: {r: 0.01, g: 1.70942, b: 0.58844, a: -0.00588}
   m_BuildTextureStacks: []

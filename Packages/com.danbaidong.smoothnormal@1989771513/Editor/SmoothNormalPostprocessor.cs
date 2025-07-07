@@ -10,7 +10,7 @@ namespace UnityEditor.SmoothNormalTool
     /// </summary>
     public class SmoothNormalPostprocessor : AssetPostprocessor
     {
-        private static int s_DISTANCE_THRESHOLD = Shader.PropertyToID("_DISTANCE_THRESHOLD");
+        private static readonly int s_DISTANCE_THRESHOLD = Shader.PropertyToID("_DISTANCE_THRESHOLD");
         /// <summary>
         /// After importing model.
         /// </summary>

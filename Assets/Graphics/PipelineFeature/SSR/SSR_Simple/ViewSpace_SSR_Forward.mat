@@ -47,7 +47,6 @@ Material:
     m_Ints: []
     m_Floats:
     - _DepthThreshold: 0.01
-    - _FallbackBlend: 0.833
     - _FresnelPower: 0.5
     - _MaxRayLength: 36
     - _NormalStrength: 0
