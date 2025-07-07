@@ -117,8 +117,8 @@ MonoBehaviour:
   - {fileID: 3201184281507716911}
   _trailMaterial: {fileID: 2100000, guid: ac9b90e7e75085d4ca2d700bc8167a2a, type: 2}
   maxSampleCount: 50
-  speed: 2
   widthAtten: 0.32
+  duration: 1
 --- !u!1 &7223895847938762086
 GameObject:
   m_ObjectHideFlags: 0
@@ -358,3 +358,4 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d3adf339429b1f44991b95972a4017f3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  horizon: 0
