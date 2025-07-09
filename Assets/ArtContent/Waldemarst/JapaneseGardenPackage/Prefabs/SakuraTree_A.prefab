@@ -357,12 +357,8 @@ Material:
   m_Shader: {fileID: 4800000, guid: 5ec81c81908db34429b4f6ddecadd3bd, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
-  m_ValidKeywords:
-  - EFFECT_BUMP
-  - EFFECT_HUE_VARIATION
-  m_InvalidKeywords:
-  - BACKFACE_NORMAL_MODE_MIRROR
-  - _WINDQUALITY_BEST
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0

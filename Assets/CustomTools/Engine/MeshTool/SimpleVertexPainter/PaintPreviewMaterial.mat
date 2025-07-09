@@ -12,14 +12,7 @@ Material:
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
-  m_InvalidKeywords:
-  - NOKEWO
-  - N_F_O_ON
-  - N_F_RELGI_ON
-  - N_F_SS_ON
-  - _
-  - _EMISSIVE_SIMPLE
-  - _OUTLINE_NML
+  m_InvalidKeywords: []
   m_LightmapFlags: 0
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0

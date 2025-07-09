@@ -1,7 +1,7 @@
 ﻿Shader "Hidden/Custom/MipmapBlur"
 {
     HLSLINCLUDE
-    #pragma exclude_renderers gles
+    // #pragma exclude_renderers gles
     #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
     #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
 

@@ -421,15 +421,12 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: Billboard Material
-  m_Shader: {fileID: -6465566751694194690, guid: 9920c1f1781549a46ba081a2a15a16ec,
-    type: 3}
+  m_Shader: {fileID: 4800000, guid: 5ec81c81908db34429b4f6ddecadd3bd, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
   m_InvalidKeywords:
   - BACKFACE_NORMAL_MODE_MIRROR
-  - EFFECT_BUMP
-  - EFFECT_HUE_VARIATION
   - _WINDQUALITY_BEST
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
@@ -445,37 +442,17 @@ Material:
         m_Texture: {fileID: 2800000, guid: 2dcdd9083c1e94706b8402660b21d337, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
-    - _ExtraTex:
-        m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
     - _MainTex:
         m_Texture: {fileID: 2800000, guid: 3991938c5b4edeb3d80997e6d735cc56, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
-    - _SubsurfaceTex:
-        m_Texture: {fileID: 0}
-        m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - BACKFACE_NORMAL_MODE: 1
-    - EFFECT_BILLBOARD: 0
-    - EFFECT_EXTRA_TEX: 1
-    - _AlphaClipThreshold: 0.33
-    - _Glossiness: 0.5
-    - _HueVariationKwToggle: 1
-    - _Metallic: 0
-    - _NormalMapKwToggle: 1
-    - _OldHueVarBehavior: 0
-    - _SubsurfaceIndirect: 0.25
-    - _SubsurfaceKwToggle: 0
-    - _WINDQUALITY: 4
+    - _Cutoff: 0.333
     - _WindQuality: 0
     m_Colors:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
-    - _HueVariationColor: {r: 1, g: 0.5, b: 0, a: 0.2}
-    - _SubsurfaceColor: {r: 1, g: 1, b: 1, a: 1}
+    - _HueVariation: {r: 1, g: 0.5, b: 0, a: 0.1}
   m_BuildTextureStacks: []
 --- !u!21 &21700578012469144
 Material:

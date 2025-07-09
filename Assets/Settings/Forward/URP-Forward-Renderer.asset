@@ -96,7 +96,8 @@ MonoBehaviour:
   - {fileID: 7914389848471918926}
   - {fileID: -4554141828574574587}
   - {fileID: -1481777759031923265}
-  m_RendererFeatureMap: adc0de57c6d2eee54e59208ca28fd56d058810c32270ccc0bfedd39cfaaa6feb
+  - {fileID: 5517329816133895606}
+  m_RendererFeatureMap: adc0de57c6d2eee54e59208ca28fd56d058810c32270ccc0bfedd39cfaaa6febb60555573c7e914c
   m_UseNativeRenderPass: 0
   postProcessData: {fileID: 11400000, guid: 41439944d30ece34e96484bdb6645b55, type: 2}
   xrSystemData: {fileID: 11400000, guid: 60e1133243b97e347b653163a8c01b64, type: 2}
@@ -139,6 +140,25 @@ MonoBehaviour:
   m_CopyDepthMode: 0
   m_AccurateGbufferNormals: 0
   m_IntermediateTextureMode: 1
+--- !u!114 &5517329816133895606
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c3e498d8c54eeb6448630826245ddcc2, type: 3}
+  m_Name: KuwaharaFilter
+  m_EditorClassIdentifier: 
+  m_Active: 0
+  settings:
+    blurMaterial: {fileID: 2100000, guid: 9c902c78dabc3294bb0f752863c692bc, type: 2}
+    event: 550
+    eventOffset: -1
+    blurRadius: 3
+    mode: 2
 --- !u!114 &7914389848471918926
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -154,8 +174,8 @@ MonoBehaviour:
   m_Active: 0
   settings:
     passTag: Mipmap Blur
-    event: 500
     blurMaterial: {fileID: 2100000, guid: d168c8f16dfeb624ab9a23bd30b81b03, type: 2}
+    event: 500
     blurLevel: 25
     outPutToUIBackGround: 0
     redutionFrameRatio: 1

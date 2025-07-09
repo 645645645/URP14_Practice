@@ -11,8 +11,11 @@ public class MipmapBlur : ScriptableRendererFeature
     public class Settings
     {
         public string passTag = "Mipmap Blur";
-        public RenderPassEvent @event = RenderPassEvent.BeforeRenderingPostProcessing;
+
         [_ReadOnly] public Material blurMaterial;
+        
+        public RenderPassEvent @event = RenderPassEvent.BeforeRenderingPostProcessing;
+        
         [Range(0, 50)] public float blurLevel = 25;
 
         [Space(10)] public bool outPutToUIBackGround = false;
