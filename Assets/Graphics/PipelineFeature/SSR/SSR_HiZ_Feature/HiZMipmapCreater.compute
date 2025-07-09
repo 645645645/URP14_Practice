@@ -6,7 +6,10 @@
 #include "ReductionCommon.hlsl"
 
 // #pragma enable_d3d11_debug_symbols
-#pragma kernel KHZBCreator KERNEL_NAME=KHZBCreator
+#pragma kernel KHZBCreator1 KERNEL_NAME=KHZBCreator1 DIM_MIP_LEVEL_COUNT=1
+#pragma kernel KHZBCreator2 KERNEL_NAME=KHZBCreator2 DIM_MIP_LEVEL_COUNT=2
+#pragma kernel KHZBCreator3 KERNEL_NAME=KHZBCreator3 DIM_MIP_LEVEL_COUNT=3
+#pragma kernel KHZBCreator4 KERNEL_NAME=KHZBCreator4 DIM_MIP_LEVEL_COUNT=4
 
 #define MAX_MIP_BATCH_SIZE 4
 #define GROUP_TILE_SIZE 8
@@ -14,11 +17,12 @@
 CBUFFER_START(cb)
 float4 _DispatchThreadIdToBufferUV; // x: 1/width, y: 1/height, offset
 float4 _InputViewportMaxBound; // xy: 1/width, y: 1/height, zw: MaxUV
-uint _CurrentMipBatchCount; //对应 DIM_MIP_LEVEL_COUNT 是个数值变体 unity只有bool开关
+uint _CurrentMipBatchCount; //对应 DIM_MIP_LEVEL_COUNT 是个数值变体 unity这个写法还不是编译时常量 打包不知道爆不爆
 CBUFFER_END
 
 Texture2D<float> _ParentTextureMip;
 SamplerState sampler_ParentTextureMip;
+
 
 // HiZ Mipmap输出
 RWTexture2D<float> _HiZMip0;
@@ -29,29 +33,60 @@ RWTexture2D<float> _HiZMip3;
 // 线程组共享内存(64个float)
 groupshared float _GroupSharedDepth[GROUP_TILE_SIZE * GROUP_TILE_SIZE];
 
+float4 Gather4(Texture2D<float> Texture, SamplerState state, float2 uv)
+#if SHADER_API_GLES3 || SHADER_API_GLES || SHADER_API_GLCORE //|| SHADER_API_MOBILE
+{
+    float2 max = _InputViewportMaxBound.zw - _InputViewportMaxBound.xy;
+
+    float2 UV[4];
+    UV[0] = min(mad(_InputViewportMaxBound.xy, float2(-0.25, -0.25), uv), max);
+    UV[1] = min(mad(_InputViewportMaxBound.xy, float2(0.25, -0.25), uv), max);
+    UV[2] = min(mad(_InputViewportMaxBound.xy, float2(-0.25, 0.25), uv), max);
+    UV[3] = min(mad(_InputViewportMaxBound.xy, float2(0.25, 0.25), uv), max);
+
+    float4 Out;
+    Out.x = Texture.SampleLevel(state, UV[0], 0).r;
+    Out.y = Texture.SampleLevel(state, UV[1], 0).r;
+    Out.z = Texture.SampleLevel(state, UV[2], 0).r;
+    Out.w = Texture.SampleLevel(state, UV[3], 0).r;
+    return Out;
+    
+}
+#else
+{
+    uv = mad(_InputViewportMaxBound.xy, float2(-0.25, -0.25), uv);
+    uv = min(uv, _InputViewportMaxBound.zw - _InputViewportMaxBound.xy);
+
+    // 采样2x2区域的深度值(使用gather取4个角点) Gather不支持msaa
+    return Texture.GatherRed(state, uv, 0);
+}
+#endif
+
+
+
+
+
+
 void OutputMipLevel(uint MipLevel, uint2 OutputPixelPos, float minDepth)
 {
-    // #if DIM_MIP_LEVEL_COUNT >= 2 //ue的编译宏，urp这边似乎只有shader keywords 开关
-    if (_CurrentMipBatchCount >= 2)
+    #if DIM_MIP_LEVEL_COUNT >= 2
         if (MipLevel == 1)
         {
             _HiZMip1[OutputPixelPos] = minDepth;
         }
-    // #endif
-    // #if DIM_MIP_LEVEL_COUNT >= 3
-    if (_CurrentMipBatchCount >= 3)
+    #endif
+    #if DIM_MIP_LEVEL_COUNT >= 3
         if (MipLevel == 2)
         {
             _HiZMip2[OutputPixelPos] = minDepth;
         }
-    // #endif
-    // #if DIM_MIP_LEVEL_COUNT >= 4
-    if (_CurrentMipBatchCount >= 4)
+    #endif
+    #if DIM_MIP_LEVEL_COUNT >= 4
         if (MipLevel == 3)
         {
             _HiZMip3[OutputPixelPos] = minDepth;
         }
-    // #endif
+    #endif
 }
 
 
@@ -62,44 +97,20 @@ void KERNEL_NAME(
     // uint3 groupThreadID : SV_GroupThreadID,
     uint3 GroupId : SV_GroupID) // 线程组ID
 {
-    uint2 GroupThreadId;
-    UNITY_BRANCH
-    if (_CurrentMipBatchCount == 1)
-    {
-        GroupThreadId = uint2(GroupThreadIndex % GROUP_TILE_SIZE, GroupThreadIndex / GROUP_TILE_SIZE);
-    }
-    else
-    {
+	#if DIM_MIP_LEVEL_COUNT == 1
+        uint2 GroupThreadId = uint2(GroupThreadIndex % GROUP_TILE_SIZE, GroupThreadIndex / GROUP_TILE_SIZE);
+    #else
         // 实际开发中，直接使用SV_GroupThreadID更高效
-        GroupThreadId = InitialTilePixelPositionForReduction2x2(MAX_MIP_BATCH_SIZE - 1, GroupThreadIndex);
+        uint2 GroupThreadId = InitialTilePixelPositionForReduction2x2(MAX_MIP_BATCH_SIZE - 1, GroupThreadIndex);
         // GroupThreadId = groupThreadID.xy;
-    }
+    #endif
 
     uint2 DispatchThreadId = GROUP_TILE_SIZE.xx * GroupId.xy + GroupThreadId;
 
     // 计算采样UV(考虑半个texel偏移)
     float2 uv = (float2(DispatchThreadId) + 0.5) * _DispatchThreadIdToBufferUV.xy + _DispatchThreadIdToBufferUV.zw;
 
-    // #if defined(SHADER_API_GLCORE) || defined(SHADER_API_GLES3)|| defined(SHADER_API_GLES) || defined(SHADER_API_MOBILE)
-    // float2 UV[4];
-    // UV[0] = min(float2(-0.25f, -0.25f) * _DispatchThreadIdToBufferUV.xy + uv, _InputViewportMaxBound.zw);
-    // UV[0] = min(float2(0.25f, -0.25f) * _DispatchThreadIdToBufferUV.xy + uv, _InputViewportMaxBound.zw);
-    // UV[0] = min(float2(-0.25f, 0.25f) * _DispatchThreadIdToBufferUV.xy + uv, _InputViewportMaxBound.zw);
-    // UV[0] = min(float2(0.25f, 0.25f) * _DispatchThreadIdToBufferUV.xy + uv, _InputViewportMaxBound.zw);
-    // float4 depths;
-    // depths.x = _ParentTextureMip.SampleLevel(sampler_ParentTextureMip, UV[0], 0);
-    // depths.y = _ParentTextureMip.SampleLevel(sampler_ParentTextureMip, UV[1], 0);
-    // depths.z = _ParentTextureMip.SampleLevel(sampler_ParentTextureMip, UV[2], 0);
-    // depths.w = _ParentTextureMip.SampleLevel(sampler_ParentTextureMip, UV[3], 0);
-    // #else
-    // 设置了Clamp 应该可以省
-    // 调整UV确保在有效范围内(处理非2的幂分辨率)
-    uv = mad(_InputViewportMaxBound.xy, float2(-0.25, -0.25), uv);
-    uv = min(uv, _InputViewportMaxBound.zw - _InputViewportMaxBound.xy);
-
-    // 采样2x2区域的深度值(使用gather取4个角点)
-    float4 depths = _ParentTextureMip.Gather(sampler_ParentTextureMip, uv, 0);
-    // #endif
+    float4 depths = Gather4(_ParentTextureMip, sampler_ParentTextureMip, uv);
 
     float minDepth = GetDeviceMinDepth(depths);
 
@@ -108,10 +119,10 @@ void KERNEL_NAME(
     // 写入第0级HiZ mipmap
     _HiZMip0[OutputPixelPos] = minDepth;
 
-    if (_CurrentMipBatchCount == 1)
+    #if DIM_MIP_LEVEL_COUNT == 1
     {
     }
-    else
+    #else
     {
         // 存储到共享内存以便后续mipmap计算
         _GroupSharedDepth[GroupThreadIndex] = minDepth;
@@ -154,4 +165,5 @@ void KERNEL_NAME(
             }
         }
     }
+    #endif
 }

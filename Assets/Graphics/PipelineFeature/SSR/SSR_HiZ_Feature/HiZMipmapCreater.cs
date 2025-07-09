@@ -84,7 +84,7 @@ public class HiZMipmapCreater : ScriptableRendererFeature
                 break;
             case SSRType.HiZ:
             case SSRType.HiZ_UE4:
-                m_forwardPipAsset.supportsCameraDepthTexture = false;
+                // m_forwardPipAsset.supportsCameraDepthTexture = false;
                 break;
             default:
                 break;
@@ -192,7 +192,7 @@ public class HiZMipmapCreater : ScriptableRendererFeature
 
         private readonly ComputeShader _hizComputeShader;
         private readonly Material _hizMaterial;
-        private readonly int _kernelHandle;
+        private readonly int[] _kernelHandle;
 
         private RTHandle _depthRT;
 
@@ -219,7 +219,11 @@ public class HiZMipmapCreater : ScriptableRendererFeature
             _hizMaterial = setting.hizLegacyMaterial;
             if (_hizComputeShader != null)
             {
-                _kernelHandle = _hizComputeShader.FindKernel("KHZBCreator");
+                _kernelHandle = new int[4];
+                for (int i = 0; i < 4; i++)
+                {
+                    _kernelHandle[i] = _hizComputeShader.FindKernel($"KHZBCreator{i+1}");
+                }
             }
 
             _ssrType = setting.ssrType;
@@ -497,9 +501,11 @@ public class HiZMipmapCreater : ScriptableRendererFeature
                 parentMipLevel = 0;
             }
 
+            int kernelIndex = end - startMipLevel - 1;
+
             for (int i = startMipLevel; i < end; i++)
             {
-                cmd.SetComputeTextureParam(_hizComputeShader, _kernelHandle, "_HiZMip" + (i - startMipLevel), _mipRT, i);
+                cmd.SetComputeTextureParam(_hizComputeShader, _kernelHandle[kernelIndex], "_HiZMip" + (i - startMipLevel), _mipRT, i);
             }
 
             cmd.SetComputeVectorParam(_hizComputeShader, HiZConstans._InputViewportMaxBoundID, inputViewportMaxBound);
@@ -507,10 +513,10 @@ public class HiZMipmapCreater : ScriptableRendererFeature
             cmd.SetComputeIntParam(_hizComputeShader, HiZConstans._CurrentMipBatchCountID, end - startMipLevel);
 
             // new renderb
-            cmd.SetComputeTextureParam(_hizComputeShader, _kernelHandle, HiZConstans._parentTextureMipID, parent, parentMipLevel);
+            cmd.SetComputeTextureParam(_hizComputeShader, _kernelHandle[kernelIndex], HiZConstans._parentTextureMipID, parent, parentMipLevel);
             int threadGroupX = Mathf.CeilToInt(targetSize.x / 8f);
             int threadGroupY = Mathf.CeilToInt(targetSize.y / 8f);
-            cmd.DispatchCompute(_hizComputeShader, _kernelHandle, threadGroupX, threadGroupY, 1);
+            cmd.DispatchCompute(_hizComputeShader, _kernelHandle[kernelIndex], threadGroupX, threadGroupY, 1);
         }
 
         private RTHandle reAllocateTempRTIfNeeded(int index, RenderTextureDescriptor descriptor, FilterMode filterMode, TextureWrapMode wrapMode)
