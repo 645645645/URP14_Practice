@@ -199,6 +199,25 @@ MonoBehaviour:
   StencilRefValue:
     m_OverrideState: 0
     m_Value: 2
+--- !u!114 &-1476927290535707361
+MonoBehaviour:
+  m_ObjectHideFlags: 3
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5773c8ee55894a6cbac446e373bbb9e7, type: 3}
+  m_Name: KuwaharaFilter
+  m_EditorClassIdentifier: 
+  active: 1
+  mode:
+    m_OverrideState: 1
+    m_Value: 2
+  blurRadius:
+    m_OverrideState: 1
+    m_Value: 3
 --- !u!114 &11400000
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -215,6 +234,7 @@ MonoBehaviour:
   - {fileID: 5874747984020620929}
   - {fileID: -7430006417520784063}
   - {fileID: -7389850779755058790}
+  - {fileID: -1476927290535707361}
 --- !u!114 &158909194545531832
 MonoBehaviour:
   m_ObjectHideFlags: 3
