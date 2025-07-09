@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using Unity.VisualScripting;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
+using Object = UnityEngine.Object;
 
 namespace UnityEditor
 {
@@ -136,7 +137,7 @@ namespace UnityEditor
         }
         
 
-        [MenuItem("Assets/Assets Cleaner/选中Prefab 清理没用到的Mesh", false, (int)ToolsOrder.ClearParticleUnuseMeshInSelectionPrefab)]
+        [MenuItem("Assets/Assets Cleaner/选中Prefab 清理Particle没用到的Mesh", false, (int)ToolsOrder.ClearParticleUnuseMeshInSelectionPrefab)]
         public static void ClearParticleUnuseMeshInSelectionPrefab()
         {
             var gos = Selection.GetFiltered<GameObject>(SelectionMode.DeepAssets)
@@ -160,6 +161,8 @@ namespace UnityEditor
                         {
                             particle.mesh = null;
                             EditorUtility.SetDirty(item);
+                            
+                            Debug.LogFormat("ClearParticleUnuseMesh : name = {0}, particle Node = {1}", gos[i].name, particle.name);
                         }
                     }
                 }
@@ -198,7 +201,7 @@ namespace UnityEditor
         
         
 
-        [MenuItem("Assets/Assets Cleaner/所有Prefab 清理没用到的Mesh", false, (int)ToolsOrder.ClearParticleUnuseMeshInAllPrefab)]
+        [MenuItem("Assets/Assets Cleaner/所有Prefab 清理Particle没用到的Mesh", false, (int)ToolsOrder.ClearParticleUnuseMeshInAllPrefab)]
         public static void ClearParticleUnuseMeshInAllPrefab()
         {
             var paths = AssetDatabase.FindAssets("t:prefab", new string[] { "Assets" })
@@ -211,8 +214,12 @@ namespace UnityEditor
             
             ParticleSystemRenderer   particle;
 
+            float percent = 1f / paths.Length;
+
             for (int i = 0; i < paths.Length; i++)
             {
+                EditorUtility.DisplayProgressBar($"{nameof(ClearParticleUnuseMeshInAllPrefab)}", $"进度：{i + 1} / {paths.Length}", i * percent);
+                
                 prefab    = AssetDatabase.LoadAssetAtPath<GameObject>(paths[i]);
                 renderers = prefab.GetComponentsInChildren<ParticleSystemRenderer>(true);
                 
@@ -223,9 +230,13 @@ namespace UnityEditor
                     {
                         particle.mesh = null;
                         EditorUtility.SetDirty(prefab);
+                        
+                        Debug.LogFormat("ClearParticleUnuseMesh : path = {0}, particle = {1}", paths[i], particle.name);
                     }
                 }
             }
+
+            EditorUtility.ClearProgressBar();
             
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
@@ -294,9 +305,14 @@ namespace UnityEditor
             Material material;
 
             string path;
+
+            float percent = 1f / materialPaths.Count;
             
             for (int i = 0; i < materialPaths.Count; i++)
             {
+                EditorUtility.DisplayProgressBar($"{nameof(CleanAllMaterials)}", $"进度：{i + 1} / {materialPaths.Count}", i * percent);
+                
+                
                 path = materialPaths[i];
 
                 //某些prefab里存多个material
@@ -319,7 +335,7 @@ namespace UnityEditor
 
                             isDirty = true;
                             
-                            Debug.LogFormat("CleanMaterial: path = {0}, material = {1}", path, material.name);
+                            Debug.LogFormat("CleanMaterial: prefab = {0}, material = {1}", path, material.name);
                         }
                     }
 
@@ -340,6 +356,8 @@ namespace UnityEditor
                 }
             }
 
+            EditorUtility.ClearProgressBar();
+            
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
 
@@ -387,14 +405,14 @@ namespace UnityEditor
 
                 if (!isRecord)
                 {
-                    shaderKeywords = GetShaderKeywords(shader);
+                    shaderKeywords = GetLocalShaderKeywords(shader);
                     shaderKeywordsCache.Add(shader.name, shaderKeywords);
                 }
 
                 if (shaderKeywords != null)
                 {
                     List<string> matKeywords = new List<string>(material.shaderKeywords);
-                    for (int i = matKeywords.Count - 1; i >= 0; --i)
+                    for (int i = matKeywords.Count - 1; i >= 0; i--)
                     {
                         if (shaderKeywords.Contains(matKeywords[i]))
                             continue;
@@ -414,13 +432,28 @@ namespace UnityEditor
             return result;
         }
         
-        private static readonly System.Reflection.MethodInfo method =
-            typeof(ShaderUtil).GetMethod("GetShaderGlobalKeywords",
-                                         System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-
-        private static string[] GetShaderKeywords(Shader shader)
+        private static string[] GetGlobalShaderKeywords(Shader shader)
         {
-            return method?.Invoke(null, new object[] { shader }) as string[];
+            return ShaderVariant.Utils.RflxStaticCall(
+                                                      typeof(ShaderUtil),
+                                                      "GetShaderGlobalKeywords",
+                                                      new object[] { shader }) as string[];
+        }
+        
+        private static string[] GetLocalShaderKeywords(Shader shader)
+        {
+            return ShaderVariant.Utils.RflxStaticCall(
+                                                      typeof(ShaderUtil),
+                                                      "GetShaderLocalKeywords",
+                                                      new object[] { shader }) as string[];
+        }
+
+        public static ulong GetVariantCount(Shader s, bool usedBySceneOnly)
+        {
+            return (ulong)ShaderVariant.Utils.RflxStaticCall(
+                                                             typeof(ShaderUtil),
+                                                             "GetVariantCount", 
+                                                             new object[] { s, usedBySceneOnly });
         }
 
         
