@@ -36,13 +36,14 @@ namespace UnityEngine.Rendering.Universal
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
+            if(renderingData.cameraData.isPreviewCamera)
+                return;
+            
             renderer.EnqueuePass(m_sssssPass);
         }
 
         public override void SetupRenderPasses(ScriptableRenderer renderer, in RenderingData renderingData)
         {
-            // i use CopyDepthPass, a bug about msaa&depthfeath
-            // That is to say, after enable MSAA, bind stencil function becomes ineffective.
             m_sssssPass.SetUp(renderer.cameraColorTargetHandle, renderer.cameraDepthTargetHandle);
         }
 
@@ -90,7 +91,7 @@ namespace UnityEngine.Rendering.Universal
             public void SetUp(in RTHandle colorHandle, in RTHandle depthHandle)
             {
                 currentColorTarget = colorHandle;
-                currentDepthTarget = depthHandle;
+                currentDepthTarget = depthHandle;//stencel
             }
 
             public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
@@ -107,7 +108,7 @@ namespace UnityEngine.Rendering.Universal
                 m_CameraBufferDescriptor.depthBufferBits = 0;
                 m_CameraBufferDescriptor.autoGenerateMips = false;
                 m_CameraBufferDescriptor.memoryless = RenderTextureMemoryless.MSAA | RenderTextureMemoryless.Depth;
-                // m_CameraBufferDescriptor.msaaSamples = 1;
+                m_CameraBufferDescriptor.msaaSamples = 1;
 
                 CheckScreenResize();
                 if (!m_rtIsCreated)
@@ -119,6 +120,10 @@ namespace UnityEngine.Rendering.Universal
                     RenderingUtils.ReAllocateIfNeeded(ref m_TempTargetId, m_CameraBufferDescriptor, FilterMode.Bilinear, TextureWrapMode.Clamp,
                         false, 1, 0, name: "_Destination");
                 }
+
+                //要透明之后的color
+                if (m_UseMsaa)
+                    ConfigureInput(ScriptableRenderPassInput.Depth); //read
             }
 
             public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
@@ -133,11 +138,12 @@ namespace UnityEngine.Rendering.Universal
                     return;
                 var cmd = CommandBufferPool.Get(k_RenderTag);
 
-                var material = ssssMaterial;
+                var renderer = renderingData.cameraData.renderer;
+
+                var      material    = ssssMaterial;
                 RTHandle sourceColor = currentColorTarget;
-                RTHandle destDepth = currentDepthTarget;
-                var tempColor = m_TempTargetId;
-                // var tempColor = renderingData.cameraData.renderer.GetCameraColorFrontBuffer(cmd);
+                RTHandle destDepth   = currentDepthTarget;
+                var      tempColor   = m_TempTargetId;
 
                 Vector3 SSSColor = new Vector3(m_SSSS.SubsurfaceColor.value.r, m_SSSS.SubsurfaceColor.value.g, m_SSSS.SubsurfaceColor.value.b);
                 Vector3 SSSFalloff = new Vector3(m_SSSS.SubsurfaceFalloff.value.r, m_SSSS.SubsurfaceFalloff.value.g, m_SSSS.SubsurfaceFalloff.value.b);
@@ -157,6 +163,9 @@ namespace UnityEngine.Rendering.Universal
 
                 material.SetFloat("_RefValue", m_SSSS.StencilRefValue.value);
 
+                material.SetTexture("_CameraDepthTexture", m_UseMsaa ? renderer.GetCopyDepth() : destDepth);
+
+                //开启msaa, 如果使用内置copy depth pass会丢掉stencil，而 硬解 msaa很酸爽，所以这玩意定位就是跟msaa不熟
                 {
                     cmd.SetGlobalVector("_SSSSDirection", new Vector4(m_SSSS.SubsurfaceWidth.value, 0f, 0f, 0f));
                     CoreUtils.SetRenderTarget(cmd, tempColor, RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store,
@@ -170,7 +179,7 @@ namespace UnityEngine.Rendering.Universal
                 }
                 
                 context.ExecuteCommandBuffer(cmd);
-                cmd.Clear();
+                // cmd.Clear();
                 CommandBufferPool.Release(cmd);
             }
             

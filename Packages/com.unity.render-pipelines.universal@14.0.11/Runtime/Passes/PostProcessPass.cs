@@ -360,6 +360,9 @@ namespace UnityEngine.Rendering.Universal
             var dofMaterial = m_DepthOfField.mode.value == DepthOfFieldMode.Gaussian ? m_Materials.gaussianDepthOfField : m_Materials.bokehDepthOfField;
             bool useDepthOfField = m_DepthOfField.IsActive() && !isSceneViewCamera && dofMaterial != null;
             bool useLensFlare = !LensFlareCommonSRP.Instance.IsEmpty() && m_SupportDataDrivenLensFlare;
+
+            bool useBloom = m_Bloom.IsActive();//
+            
             bool useMotionBlur = m_MotionBlur.IsActive() && !isSceneViewCamera;
             bool usePaniniProjection = m_PaniniProjection.IsActive() && !isSceneViewCamera;
 
@@ -376,13 +379,14 @@ namespace UnityEngine.Rendering.Universal
 
             bool useKuwahara = m_KuwaharaFilter.IsActive();
 
-            int amountOfPassesRemaining = (useStopNan ? 1 : 0) +
-                                          (useSubPixeMorpAA ? 1 : 0) + 
-                                          (useDepthOfField ? 1 : 0) + 
-                                          (useLensFlare ? 1 : 0) + 
-                                          (useTemporalAA ? 1 : 0) + 
-                                          (useMotionBlur ? 1 : 0) + 
-                                          (usePaniniProjection ? 1 : 0) + 
+            int amountOfPassesRemaining = (useStopNan ? 1 : 0)       +
+                                          (useSubPixeMorpAA ? 1 : 0) +
+                                          (useDepthOfField ? 1 : 0)  +
+                                          // (useLensFlare ? 1 : 0)        + 
+                                          (useBloom ? 1 : 0)            +//增加
+                                          (useTemporalAA ? 1 : 0)       +
+                                          (useMotionBlur ? 1 : 0)       +
+                                          (usePaniniProjection ? 1 : 0) +
                                           (useKuwahara ? 1 : 0);
 
             if (m_UseSwapBuffer && amountOfPassesRemaining > 0)
@@ -533,6 +537,9 @@ namespace UnityEngine.Rendering.Universal
                 }
             }
 
+            //放在这里，不用硬解MSAA, but LensFlare 不受滤镜影响, 可以将LensFlare 提前到滤镜之前，那样 LensFlare又会产生bloom
+            //理想效果 是滤镜塞进uber post里的最后(某个分支 多Sample硬解MSAA..)，还不方便用stencil分层mask
+            //综上 选择妥协，LensFlare 提前到滤镜之前
             if (useKuwahara)
             {
                 using (new ProfilingScope(cmd, ProfilingSampler.Get(URPProfileId.KuwaharaFilter)))
@@ -549,8 +556,7 @@ namespace UnityEngine.Rendering.Universal
                 m_Materials.uber.shaderKeywords = null;
 
                 // Bloom goes first
-                bool bloomActive = m_Bloom.IsActive();
-                if (bloomActive)
+                if (useBloom)
                 {
                     using (new ProfilingScope(cmd, ProfilingSampler.Get(URPProfileId.Bloom)))
                         SetupBloom(cmd, GetSource(), m_Materials.uber);

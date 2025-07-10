@@ -451,6 +451,17 @@ namespace UnityEngine.Rendering.Universal
         {
             return null;
         }
+        
+        
+        public virtual RTHandle GetCopyColor()
+        {
+            return null;
+        }
+
+        public virtual RTHandle GetCopyDepth()
+        {
+            return null;
+        }
 
         /// <summary>
         /// Returns the camera depth target for this renderer.

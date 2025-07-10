@@ -1665,5 +1665,17 @@ namespace UnityEngine.Rendering.Universal
         {
             m_ColorBufferSystem.EnableMSAA(enable);
         }
+        
+        //ConfigureInput(ScriptableRenderPassInput.Color) in feature
+        public override RTHandle GetCopyColor()
+        {
+            return m_OpaqueColor;
+        }
+
+        //CopyDepthPass 会丢stencil
+        public override RTHandle GetCopyDepth()
+        {
+            return m_DepthTexture;
+        }
     }
 }

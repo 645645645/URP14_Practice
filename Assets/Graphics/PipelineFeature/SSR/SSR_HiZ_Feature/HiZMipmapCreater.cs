@@ -38,8 +38,6 @@ public class HiZMipmapCreater : ScriptableRendererFeature
 
     HiZMipmapRenderPass m_HiZMipmapCreatePass;
 
-    [Header("ForwardRenderingPath")] public UniversalRenderPipelineAsset m_forwardPipAsset;
-
     public HiZSetting m_Settings;
 
 
@@ -49,7 +47,6 @@ public class HiZMipmapCreater : ScriptableRendererFeature
 
         //-------
         if (!isActive) return;
-        reSetPipSettings();
         //------
 
 
@@ -59,48 +56,16 @@ public class HiZMipmapCreater : ScriptableRendererFeature
         };
     }
 
-    private void reSetPipSettings()
-    {
-        if (m_forwardPipAsset == null)
-        {
-            var pipAssets = GraphicsSettings.currentRenderPipeline as UniversalRenderPipelineAsset;
-            m_forwardPipAsset = pipAssets;
-        }
-        else
-        {
-            GraphicsSettings.renderPipelineAsset = m_forwardPipAsset;
-        }
-
-        m_forwardPipAsset.supportsCameraOpaqueTexture = true;
-        // m_forwardPipAsset.opaqueDownsampling = Downsampling._4xBilinear;
-
-        if (!SystemInfo.supportsComputeShaders && m_Settings.ssrType == SSRType.HiZ)
-            m_Settings.ssrType = SSRType.Simple;
-
-        switch (m_Settings.ssrType)
-        {
-            case SSRType.Simple:
-                m_forwardPipAsset.supportsCameraDepthTexture = true;
-                break;
-            case SSRType.HiZ:
-            case SSRType.HiZ_UE4:
-                // m_forwardPipAsset.supportsCameraDepthTexture = false;
-                break;
-            default:
-                break;
-        }
-    }
-
     public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
     {
         if (renderingData.cameraData.isPreviewCamera)
             return;
-        if (m_Settings.hizComputeShader == null)
+        if (m_Settings.hizComputeShader == null || m_Settings.hizLegacyMaterial == null)
         {
-            Debug.LogError($"SSR Render Feature: {nameof(HiZMipmapCreater)} .<ConmputeShader> is null");
+            Debug.LogError($"SSR Render Feature: {nameof(HiZMipmapCreater)} .<ConmputeShader> or <Material> is null");
             return;
         }
-
+        
         renderer.EnqueuePass(m_HiZMipmapCreatePass);
     }
 
@@ -167,7 +132,7 @@ public class HiZMipmapCreater : ScriptableRendererFeature
                 enableRandomWrite = false
             };
 #if true
-            public static readonly bool SupportComputeShaders = SystemInfo.supportsComputeShaders ||
+            public static readonly bool SupportComputeShaders = SystemInfo.supportsComputeShaders &&
                                                                 SystemInfo.SupportsRandomWriteOnRenderTextureFormat(CustomDepthFormat);
 #else
             public static readonly bool SupportComputeShaders = false;
@@ -183,10 +148,11 @@ public class HiZMipmapCreater : ScriptableRendererFeature
                                                                  SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3;
         }
 
+        private ProfilingSampler m_ProfilingSampler;
 
-        private static RTHandle _mipRT;
-        private static RTHandle[] _tempRTs;
-        private static bool[] _tempRTsIsCreated;
+        private RTHandle _mipRT;
+        private RTHandle[] _tempRTs;
+        private bool[] _tempRTsIsCreated;
         private const int MaxMipmapLevelOutBatchCount = 4;
         private readonly string _passTag = "HiZ_MipmapCreatorPass";
 
@@ -211,6 +177,7 @@ public class HiZMipmapCreater : ScriptableRendererFeature
 
         private bool bUseCompute;
         private bool bUseTemp;
+        private bool useMSAA;
 
 
         public HiZMipmapRenderPass(HiZSetting setting)
@@ -232,17 +199,29 @@ public class HiZMipmapCreater : ScriptableRendererFeature
             _ssrThreshold = setting.ssrThreshold;
             _ssrDithering = setting.ssrDithering;
             bUseCompute = HiZConstans.SupportComputeShaders;
-            bUseTemp = !HiZConstans.SupportComputeShaders || !HiZConstans.SupportsMemoryBarriers;
+            bUseTemp = HiZConstans.SupportComputeShaders && !HiZConstans.SupportsMemoryBarriers;
             // Debug.Log("supportedRandomWriteTargetCount = " +  SystemInfo.supportedRandomWriteTargetCount);
             // Debug.Log("R8 = " +  SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.R8));
             // Debug.Log("R16 = " +  SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.R16));
             // Debug.Log("RHalf = " +  SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.RHalf));
             // Debug.Log("RFloat = " +  SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.RFloat));
+
+            m_ProfilingSampler = new ProfilingSampler(_passTag);
         }
 
-        public void SetUp(RTHandle depth)
+        public void SetUp(in RTHandle cameraDepth)
         {
-            _depthRT = depth;
+            _depthRT = cameraDepth;
+            
+            useMSAA  = cameraDepth.isMSAAEnabled;
+            
+            //默认需要color (with downSample)
+            var inputConfig = ScriptableRenderPassInput.Color;
+
+            if (useMSAA)
+                inputConfig |= ScriptableRenderPassInput.Depth;
+            
+            ConfigureInput(inputConfig);
         }
 
         public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
@@ -265,10 +244,8 @@ public class HiZMipmapCreater : ScriptableRendererFeature
                     cmd.DisableKeyword(HiZConstans._ssrHizKeyword);
                     return;
             }
-
-            var cameraData = renderingData.cameraData;
-            var renderer = cameraData.renderer;
-            var cameraDescriptor = cameraData.cameraTargetDescriptor;
+            
+            var cameraDescriptor = renderingData.cameraData.cameraTargetDescriptor;
 
             CheckScreenResize(cameraDescriptor);
 
@@ -337,26 +314,17 @@ public class HiZMipmapCreater : ScriptableRendererFeature
             if (_ssrType == SSRType.Simple)
                 return;
 
-            CommandBuffer cmd = CommandBufferPool.Get(_passTag);
-            // using (new ProfilingScope(cmd, new ProfilingSampler("HZB_bulid")))
+            CommandBuffer cmd = CommandBufferPool.Get();
+            using (new ProfilingScope(cmd, m_ProfilingSampler))
             {
-                // var cameraData = renderingData.cameraData;
-                // var renderer = cameraData.renderer;
-
 
                 if (bUseCompute)
                 {
-                    if (_hizComputeShader == null)
-                    {
-                        Debug.LogError("HiZ Mipmap Render Feature <conmputeShader> is null");
-                        return;
-                    }
-
                     // Reduce first mips
                     {
-                        Vector2Int srcSize = new Vector2Int(_camDescriptor.width, _camDescriptor.height);
-                        Vector2Int destSize = _MipLevelSize[0];
-                        RTHandle parentTextureMip = _depthRT;
+                        Vector2Int srcSize          = new Vector2Int(_camDescriptor.width, _camDescriptor.height);
+                        Vector2Int destSize         = _MipLevelSize[0];
+                        RTHandle   parentTextureMip = useMSAA ? renderingData.cameraData.renderer.GetCopyDepth() : _depthRT;
                         Vector4 dispatchThreadIdToBufferUV = new Vector4()
                         {
                             x = 2.0f / (float)srcSize.x,
@@ -412,18 +380,14 @@ public class HiZMipmapCreater : ScriptableRendererFeature
                 }
                 else
                 {
-                    if (_hizMaterial == null)
-                    {
-                        Debug.LogError("HiZ Mipmap Render Feature <material> is null");
-                        return;
-                    }
-
                     //save cost: depth to temp0
                     //first depth to mip0 -> to temp1 -> copy to mip1
                     Vector2Int srcSize = new Vector2Int(_camDescriptor.width, _camDescriptor.height);
                     Vector2Int destSize = _MipLevelSize[0];
-                    RTHandle src = _depthRT;
+
+                    RTHandle src  = useMSAA ? renderingData.cameraData.renderer.GetCopyDepth() : _depthRT;
                     RTHandle dest = _mipRT;
+
                     Rect viewPort = new Rect(Vector2.zero, srcSize / 2);
 
 
@@ -557,7 +521,6 @@ public class HiZMipmapCreater : ScriptableRendererFeature
             _tempRTsIsCreated = null;
             Shader.DisableKeyword(HiZConstans._ssrHizKeyword);
             Shader.DisableKeyword(HiZConstans._ssrHizUE4Keyword);
-            //pip设置恢复 ？
         }
     }
 }
