@@ -105,7 +105,7 @@ namespace UnityEngine.Rendering.Universal.Internal
             else
                 ConfigureTarget(colorHandles, depthHandle);
 
-            ConfigureClear(ClearFlag.All, Color.black);
+            ConfigureClear(ClearFlag.All, Color.clear);
         }
 
         private static void ExecutePass(ScriptableRenderContext context, PassData passData, ref RenderingData renderingData)

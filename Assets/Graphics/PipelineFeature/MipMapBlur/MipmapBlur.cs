@@ -55,7 +55,6 @@ public class MipmapBlur : ScriptableRendererFeature
     {
         if (renderingData.cameraData.isSceneViewCamera || renderingData.cameraData.isPreviewCamera)
             return;
-        m_Pass.SetUp(renderer.cameraColorTargetHandle);
     }
 
     protected override void Dispose(bool disposing)
@@ -105,12 +104,7 @@ public class MipmapBlurPass : ScriptableRenderPass
         m_selfFrame = redutionFrequencyRatio - 1;
         m_outToUIBackground = outToUIBackground;
     }
-
-    public void SetUp(RTHandle rtHandle)
-    {
-        m_CameraColor = rtHandle;
-    }
-
+    
     public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
     {
         {
@@ -203,6 +197,7 @@ public class MipmapBlurPass : ScriptableRenderPass
         var cmd = CommandBufferPool.Get(m_ProfilingSampler.name);
         // using (new ProfilingScope(cmd, m_ProfilingSampler))
         {
+            m_CameraColor = renderingData.cameraData.renderer.cameraColorTargetHandle;
             cmd.SetGlobalTexture(PID._TempMipTexture, m_CameraColor);
             Blitter.BlitCameraTexture(cmd, m_CameraColor, PID._TextureWithMips,
                 RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store,

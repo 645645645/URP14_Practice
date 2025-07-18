@@ -154,12 +154,12 @@ Shader "URPForward/SSRWater/SSR_Water"
 
                 float3 clipPos = input.vertex.xyz / input.vertex.w;
                 clipPos.xyz = clipPos.xyz * 0.5 + 0.5;
-                // #ifdef UNITY_UV_STARTS_AT_TOP
-                // clipPos.y = 1 - clipPos.y;
-                // #endif
-                // #ifdef   UNITY_REVERSED_Z
-                // clipPos.z = 1 - clipPos.z;
-                // #endif
+                #ifdef UNITY_UV_STARTS_AT_TOP
+                clipPos.y = 1 - clipPos.y;
+                #endif
+                #ifdef   UNITY_REVERSED_Z
+                clipPos.z = 1 - clipPos.z;
+                #endif
                 // float cDepth = SampleSceneDepthLOD(clipPos.xy, 0);
                 // 这三效果不一样 注 UNITY_UV_STARTS_AT_TOP 是渲染到纹理的设置
                 //  unity_CameraInvProjection 相机z取反, 没处理 UNITY_UV_STARTS_AT_TOP

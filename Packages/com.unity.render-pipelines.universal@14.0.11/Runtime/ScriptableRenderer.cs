@@ -463,6 +463,16 @@ namespace UnityEngine.Rendering.Universal
             return null;
         }
 
+        public virtual RTHandle GetCopyNormal()
+        {
+            return null;
+        }
+
+        public virtual RTHandle GetCopyMoveVector()
+        {
+            return null;
+        }
+
         /// <summary>
         /// Returns the camera depth target for this renderer.
         /// It's only valid to call cameraDepthTarget in the scope of <c>ScriptableRenderPass</c>.

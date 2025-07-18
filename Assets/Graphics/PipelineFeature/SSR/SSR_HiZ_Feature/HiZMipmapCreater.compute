@@ -6,18 +6,17 @@
 #include "ReductionCommon.hlsl"
 
 // #pragma enable_d3d11_debug_symbols
-#pragma kernel KHZBCreator1 KERNEL_NAME=KHZBCreator1 DIM_MIP_LEVEL_COUNT=1
-#pragma kernel KHZBCreator2 KERNEL_NAME=KHZBCreator2 DIM_MIP_LEVEL_COUNT=2
-#pragma kernel KHZBCreator3 KERNEL_NAME=KHZBCreator3 DIM_MIP_LEVEL_COUNT=3
-#pragma kernel KHZBCreator4 KERNEL_NAME=KHZBCreator4 DIM_MIP_LEVEL_COUNT=4
+#pragma kernel KHZBCreator1 KERNEL_NAME=KHZBCreator1 DIM_MIP_LEVEL_COUNT=1 BATCH_COUNT=1
+#pragma kernel KHZBCreator2 KERNEL_NAME=KHZBCreator2 DIM_MIP_LEVEL_COUNT=2 BATCH_COUNT=2
+#pragma kernel KHZBCreator3 KERNEL_NAME=KHZBCreator3 DIM_MIP_LEVEL_COUNT=3 BATCH_COUNT=3
+#pragma kernel KHZBCreator4 KERNEL_NAME=KHZBCreator4 DIM_MIP_LEVEL_COUNT=4 BATCH_COUNT=4
 
 #define MAX_MIP_BATCH_SIZE 4
 #define GROUP_TILE_SIZE 8
 
 CBUFFER_START(cb)
 float4 _DispatchThreadIdToBufferUV; // x: 1/width, y: 1/height, offset
-float4 _InputViewportMaxBound; // xy: 1/width, y: 1/height, zw: MaxUV
-uint _CurrentMipBatchCount; //对应 DIM_MIP_LEVEL_COUNT 是个数值变体 unity这个写法还不是编译时常量 打包不知道爆不爆
+float4 _InputViewportMaxBound; // x: 1/width, y: 1/height, zw: MaxUV
 CBUFFER_END
 
 Texture2D<float> _ParentTextureMip;
@@ -129,39 +128,36 @@ void KERNEL_NAME(
 
 
         UNITY_UNROLL
-        for (uint MipLevel = 1; MipLevel < MAX_MIP_BATCH_SIZE; MipLevel++)
+        for (uint MipLevel = 1; MipLevel < BATCH_COUNT; MipLevel++)
         {
-            if (MipLevel < _CurrentMipBatchCount)
+            const uint TileSize = (uint)GROUP_TILE_SIZE / (1 << MipLevel);
+            const uint ReduceBankSize = TileSize * TileSize;
+
+            // LDS has been written before.
+            if (MipLevel == 1)
+                GroupMemoryBarrierWithGroupSync();
+
+            UNITY_BRANCH
+            if (GroupThreadIndex < ReduceBankSize)
             {
-                const uint TileSize = (uint)GROUP_TILE_SIZE / (1 << MipLevel);
-                const uint ReduceBankSize = TileSize * TileSize;
+                float4 ParentDeviceZ;
+                ParentDeviceZ[0] = minDepth;
 
-                // LDS has been written before.
-                if (MipLevel == 1)
-                    GroupMemoryBarrierWithGroupSync();
 
-                UNITY_BRANCH
-                if (GroupThreadIndex < ReduceBankSize)
+                UNITY_UNROLL
+                for (uint i = 1; i < 4; i++)
                 {
-                    float4 ParentDeviceZ;
-                    ParentDeviceZ[0] = minDepth;
-
-
-                    UNITY_UNROLL
-                    for (uint i = 1; i < 4; i++)
-                    {
-                        uint LDSIndex = GroupThreadIndex + i * ReduceBankSize;
-                        ParentDeviceZ[i] = _GroupSharedDepth[LDSIndex];
-                    }
-
-                    minDepth = GetDeviceMinDepth(ParentDeviceZ);
-
-
-                    OutputPixelPos = OutputPixelPos >> 1;
-                    OutputMipLevel(MipLevel, OutputPixelPos, minDepth);
-
-                    _GroupSharedDepth[GroupThreadIndex] = minDepth;
+                    uint LDSIndex = GroupThreadIndex + i * ReduceBankSize;
+                    ParentDeviceZ[i] = _GroupSharedDepth[LDSIndex];
                 }
+
+                minDepth = GetDeviceMinDepth(ParentDeviceZ);
+
+
+                OutputPixelPos = OutputPixelPos >> 1;
+                OutputMipLevel(MipLevel, OutputPixelPos, minDepth);
+
+                _GroupSharedDepth[GroupThreadIndex] = minDepth;
             }
         }
     }

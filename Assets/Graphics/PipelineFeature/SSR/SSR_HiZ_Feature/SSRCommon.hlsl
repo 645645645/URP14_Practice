@@ -137,27 +137,46 @@ float ComputeHitVignetteFromScreenPos(float2 ScreenPos)
     return SafeSaturate(1.0 - dot(Vignette, Vignette));
 }
 
-half ComputeHitVignetteFromScreenPos(float2 uv, float intensity, float roundness, float smoothness)
+half ComputeHitVignetteFromScreenPos(float2 uv, float intensity, float roundness)
 {
-    float2 center = float2(0.5, 0.5);
-    center = UnityStereoTransformScreenSpaceTex(center);
-    float2 dist = abs(uv - center) * intensity;
-
-    #if defined(UNITY_SINGLE_PASS_STEREO)
-    dist.x /= unity_StereoScaleOffset[unity_StereoEyeIndex].x;
-    #endif
+    // float2 center = float2(0.5, 0.5);
+    // center = UnityStereoTransformScreenSpaceTex(center);
+    // float2 dist = abs(uv - center) * intensity;
+    //
+    // #if defined(UNITY_SINGLE_PASS_STEREO)
+    // dist.x /= unity_StereoScaleOffset[unity_StereoEyeIndex].x;
+    // #endif
+    
+    float2 dist = abs(uv - 0.5) * intensity;
 
     dist.x *= roundness;
-    float vfactor = pow(saturate(1.0 - dot(dist, dist)), smoothness);
+    float vfactor = pow(saturate(1 - dot(dist, dist)), 4);
     return vfactor;
 }
 
-//y本来是roughnessMask，这里没用了
+half ComputeVignetteFromScreenPos(float2 uv, float intensity, float roundness)
+{
+    // float2 center = float2(0.5, 0.5);
+    // center = UnityStereoTransformScreenSpaceTex(center);
+    // float2 dist = abs(uv - center) * intensity;
+    //
+    // #if defined(UNITY_SINGLE_PASS_STEREO)
+    // dist.x /= unity_StereoScaleOffset[unity_StereoEyeIndex].x;
+    // #endif
+    
+    float2 dist = abs(uv - 0.5) * intensity;
+
+    dist.x *= roundness;
+    float vfactor = 1 - pow(saturate(dot(dist, dist)), 4);
+    return vfactor;
+}
+
 float GetRoughnessFade(in float Roughness)
 {
-    return SSR_INTENSITY.x * (1 - Roughness);
+    return SSR_INTENSITY.x * min(Roughness + 0.01, 1);
     // mask SSR to reduce noise and for better performance, roughness of 0 should have SSR, at MaxRoughness we fade to 0
-    return min(Roughness * _SSRParams.y + 2, 1.0) * SSR_INTENSITY.x;
+    // return min(Roughness * _SSRParams.y + 2, 1.0) * SSR_INTENSITY.x;
+//y本来是roughnessMask，这里没用了
 }
 
 
@@ -207,10 +226,7 @@ bool rayCastHiZ(float3 posWS, float3 reflectDirWS, float roughness, float sceneD
     const float Step = 1 * rcp(stepNum);
 
     float CompareTolerance = compareTolerance * Step;
-
-
-    // outHitUVz = endScreen.xyz;
-    // return true;
+    
 
     bool bFoundAnyHit = false;
     RayStepUVz *= Step;
@@ -284,17 +300,17 @@ bool rayCastHiZ(float3 posWS, float3 reflectDirWS, float roughness, float sceneD
             UNITY_UNROLLX(SSRT_SAMPLE_BATCH_SIZE)
             for (uint j = 0; j < SSRT_SAMPLE_BATCH_SIZE; j++)
             {
-                float2 sampleUv = SamplesUV[j];
-                SampleDepth[j] = GetHizDepth(sampleUv, SamplesMip[j]).r;
+                SampleDepth[j] = GetHizDepth(SamplesUV[j], SamplesMip[j]).r;
             }
         }
 
         // Evaluates the intersections.
         MultipleSampleDepthDiff = SamplesZ - SampleDepth;
         #if UNITY_UV_STARTS_AT_TOP
-        bMultipleSampleHit = abs(MultipleSampleDepthDiff) < CompareTolerance * SSR_Threshold * 0.2;
-        #else
         bMultipleSampleHit = abs(MultipleSampleDepthDiff + CompareTolerance) < CompareTolerance * SSR_Threshold;
+        // bMultipleSampleHit = abs(MultipleSampleDepthDiff + CompareTolerance) < CompareTolerance;
+        #else
+        bMultipleSampleHit = abs(MultipleSampleDepthDiff + CompareTolerance) < CompareTolerance;
         #endif
 
         // bMultipleSampleHit = abs(MultipleSampleDepthDiff + CompareTolerance) < CompareTolerance * SSR_Threshold;

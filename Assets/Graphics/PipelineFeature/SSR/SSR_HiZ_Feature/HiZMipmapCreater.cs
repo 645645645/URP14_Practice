@@ -9,7 +9,8 @@ public class HiZMipmapCreater : ScriptableRendererFeature
     {
         Simple,
         HiZ,
-        HiZ_UE4
+        HiZ_UE4,
+        Hiz_Post
     }
 
     [Serializable]
@@ -19,12 +20,13 @@ public class HiZMipmapCreater : ScriptableRendererFeature
         public ComputeShader hizComputeShader;
 
         [_ReadOnly] public Material hizLegacyMaterial;
-
-        public RenderPassEvent mipCreateEvent = RenderPassEvent.AfterRenderingOpaques;
-        [Range(-10, 10)] public int mipCreateOffset = 10;
+        
+        [Range(-10, 10)] public int passEventOffset = 10;
 
         [Space(10)] [Header("---SSR Setting---")]
         public SSRType ssrType;
+
+        public Material ssrPostMaterial;
 
         [Range(0, 5)] public float ssrIntensity = 1;
 
@@ -38,6 +40,8 @@ public class HiZMipmapCreater : ScriptableRendererFeature
 
     HiZMipmapRenderPass m_HiZMipmapCreatePass;
 
+    HIZSSRRenderPass m_HizSSRPass;
+
     public HiZSetting m_Settings;
 
 
@@ -50,9 +54,14 @@ public class HiZMipmapCreater : ScriptableRendererFeature
         //------
 
 
-        m_HiZMipmapCreatePass = new HiZMipmapRenderPass(m_Settings)
+        m_HiZMipmapCreatePass = new HiZMipmapRenderPass(m_Settings, name)
         {
-            renderPassEvent = m_Settings.mipCreateEvent + m_Settings.mipCreateOffset
+            renderPassEvent = RenderPassEvent.AfterRenderingSkybox + m_Settings.passEventOffset,
+        };
+
+        m_HizSSRPass = new HIZSSRRenderPass(m_Settings)
+        {
+            renderPassEvent = RenderPassEvent.AfterRenderingSkybox + m_Settings.passEventOffset + 1,
         };
     }
 
@@ -67,13 +76,16 @@ public class HiZMipmapCreater : ScriptableRendererFeature
         }
         
         renderer.EnqueuePass(m_HiZMipmapCreatePass);
+
+        if (m_Settings.ssrType == SSRType.Hiz_Post && m_HizSSRPass.SetUp(m_Settings))
+            renderer.EnqueuePass(m_HizSSRPass);
     }
 
     public override void SetupRenderPasses(ScriptableRenderer renderer, in RenderingData renderingData)
     {
         if (renderingData.cameraData.isPreviewCamera)
             return;
-        m_HiZMipmapCreatePass.SetUp(renderer.cameraDepthTargetHandle);
+        m_HiZMipmapCreatePass.SetUp(renderer.cameraDepthTargetHandle, m_Settings.ssrType != SSRType.Hiz_Post);
     }
 
     protected override void Dispose(bool isDisposing)
@@ -82,6 +94,12 @@ public class HiZMipmapCreater : ScriptableRendererFeature
         {
             m_HiZMipmapCreatePass.Dispose();
             m_HiZMipmapCreatePass = null;
+        }
+
+        if (m_HizSSRPass != null)
+        {
+            m_HizSSRPass.Dispose();
+            m_HizSSRPass = null;
         }
     }
 
@@ -98,7 +116,6 @@ public class HiZMipmapCreater : ScriptableRendererFeature
             public static readonly int _InputViewportMaxBoundID = Shader.PropertyToID("_InputViewportMaxBound");
             public static readonly int _DispatchThreadIdToBufferUVID = Shader.PropertyToID("_DispatchThreadIdToBufferUV");
             public static readonly int _HZBUvFactorAndInvFactor = Shader.PropertyToID("_HZBUvFactorAndInvFactor");
-            public static readonly int _CurrentMipBatchCountID = Shader.PropertyToID("_CurrentMipBatchCount");
             public static readonly int _SSRParams = Shader.PropertyToID("_SSRParams");
 
             public static readonly int _maxMipmapLevelID = Shader.PropertyToID("_MaxMipLevel");
@@ -148,13 +165,12 @@ public class HiZMipmapCreater : ScriptableRendererFeature
                                                                  SystemInfo.graphicsDeviceType == GraphicsDeviceType.OpenGLES3;
         }
 
-        private ProfilingSampler m_ProfilingSampler;
+        private readonly ProfilingSampler m_ProfilingSampler;
 
         private RTHandle _mipRT;
         private RTHandle[] _tempRTs;
         private bool[] _tempRTsIsCreated;
         private const int MaxMipmapLevelOutBatchCount = 4;
-        private readonly string _passTag = "HiZ_MipmapCreatorPass";
 
         private readonly ComputeShader _hizComputeShader;
         private readonly Material _hizMaterial;
@@ -180,7 +196,7 @@ public class HiZMipmapCreater : ScriptableRendererFeature
         private bool useMSAA;
 
 
-        public HiZMipmapRenderPass(HiZSetting setting)
+        public HiZMipmapRenderPass(HiZSetting setting, in string name)
         {
             _hizComputeShader = setting.hizComputeShader;
             _hizMaterial = setting.hizLegacyMaterial;
@@ -206,17 +222,17 @@ public class HiZMipmapCreater : ScriptableRendererFeature
             // Debug.Log("RHalf = " +  SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.RHalf));
             // Debug.Log("RFloat = " +  SystemInfo.SupportsRandomWriteOnRenderTextureFormat(RenderTextureFormat.RFloat));
 
-            m_ProfilingSampler = new ProfilingSampler(_passTag);
+            m_ProfilingSampler = new ProfilingSampler(name);
         }
 
-        public void SetUp(in RTHandle cameraDepth)
+        public void SetUp(in RTHandle cameraDepth, bool needColor)
         {
             _depthRT = cameraDepth;
             
             useMSAA  = cameraDepth.isMSAAEnabled;
             
             //默认需要color (with downSample)
-            var inputConfig = ScriptableRenderPassInput.Color;
+            var inputConfig = needColor ? ScriptableRenderPassInput.Color : ScriptableRenderPassInput.None;
 
             if (useMSAA)
                 inputConfig |= ScriptableRenderPassInput.Depth;
@@ -230,6 +246,8 @@ public class HiZMipmapCreater : ScriptableRendererFeature
 
             switch (_ssrType)
             {
+                case SSRType.Hiz_Post:
+                    break;
                 case SSRType.HiZ:
                     cmd.EnableKeyword(HiZConstans._ssrHizKeyword);
                     cmd.DisableKeyword(HiZConstans._ssrHizUE4Keyword);
@@ -290,6 +308,7 @@ public class HiZMipmapCreater : ScriptableRendererFeature
 
                 mipIsCreated = true;
             }
+            cmd.SetGlobalTexture(HiZConstans._HZBMipmapDepthTexID, _mipRT);
 
 
             // ConfigureTarget(renderer.cameraColorTargetHandle);
@@ -425,7 +444,6 @@ public class HiZMipmapCreater : ScriptableRendererFeature
 
                 Vector4 mipParams = new Vector4(_numMips - 1, Time.frameCount & 7, 0, 0);
                 cmd.SetGlobalVector(HiZConstans._maxMipmapLevelID, mipParams);
-                cmd.SetGlobalTexture(HiZConstans._HZBMipmapDepthTexID, _mipRT);
             }
 
             context.ExecuteCommandBuffer(cmd);
@@ -474,7 +492,6 @@ public class HiZMipmapCreater : ScriptableRendererFeature
 
             cmd.SetComputeVectorParam(_hizComputeShader, HiZConstans._InputViewportMaxBoundID, inputViewportMaxBound);
             cmd.SetComputeVectorParam(_hizComputeShader, HiZConstans._DispatchThreadIdToBufferUVID, dispatchThreadIdToBufferUV);
-            cmd.SetComputeIntParam(_hizComputeShader, HiZConstans._CurrentMipBatchCountID, end - startMipLevel);
 
             // new renderb
             cmd.SetComputeTextureParam(_hizComputeShader, _kernelHandle[kernelIndex], HiZConstans._parentTextureMipID, parent, parentMipLevel);
@@ -521,6 +538,109 @@ public class HiZMipmapCreater : ScriptableRendererFeature
             _tempRTsIsCreated = null;
             Shader.DisableKeyword(HiZConstans._ssrHizKeyword);
             Shader.DisableKeyword(HiZConstans._ssrHizUE4Keyword);
+        }
+    }
+
+    class HIZSSRRenderPass : ScriptableRenderPass
+    {
+        private readonly ProfilingSampler m_ProfilingSampler;
+
+        private readonly Material m_Material;
+
+        private RenderTextureDescriptor m_Desc;
+
+        private RTHandle m_ReflectionsTexture;
+
+        private RTHandle m_ColorRT;
+        private RTHandle m_NormalRT;
+
+        private static readonly int _SkyBoxTex_ID = Shader.PropertyToID("_Tex");
+
+        private Cubemap m_SkyCube;
+        private bool    hasSkyCube;
+
+        public HIZSSRRenderPass(in HiZSetting setting)
+        {
+            m_ProfilingSampler = new ProfilingSampler(nameof(HIZSSRRenderPass));
+            m_Material         = setting.ssrPostMaterial;
+        }
+
+        public bool SetUp(in HiZSetting setting)
+        {
+            ConfigureInput(ScriptableRenderPassInput.Normal | ScriptableRenderPassInput.Depth);
+            
+
+            var SkyMat=RenderSettings.skybox;
+            if (SkyMat)
+            {
+                if (SkyMat.HasTexture(_SkyBoxTex_ID))
+                {
+                    m_SkyCube  = SkyMat.GetTexture(_SkyBoxTex_ID) as Cubemap;
+                    hasSkyCube = m_SkyCube != null;
+                    if (hasSkyCube)
+                        m_Material.SetTexture(_SkyBoxTex_ID, m_SkyCube);
+                }
+            }
+            return true;
+        }
+        
+        public override void OnCameraSetup(CommandBuffer cmd, ref RenderingData renderingData)
+        {
+            var cameraData = renderingData.cameraData;
+            var render     = cameraData.renderer;
+            m_NormalRT = render.GetCopyNormal();
+
+            m_Desc = renderingData.cameraData.cameraTargetDescriptor;
+
+            m_Desc.sRGB = false;
+
+            m_Desc.depthBufferBits = -1;
+            
+            m_Desc.msaaSamples = 1;
+
+            m_Desc.colorFormat = RenderTextureFormat.RGB111110Float;
+
+            // 降分辨率就要考虑深度采样偏移了ssr的高频信息不适合down
+            // m_Desc.width >>= 1;
+            // m_Desc.height >>= 1;
+            
+            RenderingUtils.ReAllocateIfNeeded(ref m_ReflectionsTexture, m_Desc, FilterMode.Bilinear, TextureWrapMode.Clamp, name: "_CameraReflectionsTexture");
+            cmd.SetGlobalTexture(m_ReflectionsTexture.name, m_ReflectionsTexture);
+            
+            var camera = cameraData.camera;
+
+            var cameraPrej = camera.projectionMatrix;
+
+            var VP = GL.GetGPUProjectionMatrix(cameraPrej, false) * camera.worldToCameraMatrix;
+
+            m_Material.SetMatrix("_Inverse_View_ProjectionMatrix", VP.inverse);
+            m_Material.SetTexture(m_NormalRT.name, m_NormalRT);
+        }
+
+
+        private const RenderBufferLoadAction  LoadAction  = RenderBufferLoadAction.DontCare;
+        private const RenderBufferStoreAction StoreAction = RenderBufferStoreAction.Store;
+        public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData)
+        {
+            
+            CommandBuffer cmd = CommandBufferPool.Get();
+            using (new ProfilingScope(cmd, m_ProfilingSampler))
+            {
+                var render = renderingData.cameraData.renderer;
+
+                m_Material.SetTexture("_CameraOpaqueTexture", render.cameraColorTargetHandle);
+                
+                Blitter.BlitCameraTexture(cmd, m_ReflectionsTexture, m_ReflectionsTexture, LoadAction, StoreAction, m_Material, 0);
+            }
+            context.ExecuteCommandBuffer(cmd);
+            // cmd.Clear();
+            CommandBufferPool.Release(cmd);
+        }
+
+
+        public void Dispose()
+        {
+            m_ReflectionsTexture?.Release();
         }
     }
 }

@@ -16,48 +16,13 @@ MonoBehaviour:
   m_Settings:
     hizComputeShader: {fileID: 7200000, guid: 2c6185f55c116d943ad949d70b98e15d, type: 3}
     hizLegacyMaterial: {fileID: 2100000, guid: ac6ccbb69bcae8c42ab9eb1e8e3b344f, type: 2}
-    mipCreateEvent: 400
-    mipCreateOffset: 10
-    ssrType: 2
+    passEventOffset: 10
+    ssrType: 3
+    ssrPostMaterial: {fileID: 2100000, guid: 375df74df4651b74fa2f04e4882f77ba, type: 2}
     ssrIntensity: 1
-    ssrStepNums: 16
-    ssrThreshold: 1
+    ssrStepNums: 32
+    ssrThreshold: 0.88
     ssrDithering: 1
---- !u!114 &-1878332245247344467
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 0}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: f62c9c65cf3354c93be831c8bc075510, type: 3}
-  m_Name: SSAO
-  m_EditorClassIdentifier: 
-  m_Active: 0
-  m_Settings:
-    AOMethod: 1
-    Downsample: 1
-    AfterOpaque: 1
-    Source: 0
-    NormalSamples: 0
-    Intensity: 0.5
-    DirectLightingStrength: 0.25
-    Radius: 0.25
-    Samples: 2
-    BlurQuality: 0
-    Falloff: 100
-    SampleCount: -1
-  m_BlueNoise256Textures:
-  - {fileID: 2800000, guid: 36f118343fc974119bee3d09e2111500, type: 3}
-  - {fileID: 2800000, guid: 4b7b083e6b6734e8bb2838b0b50a0bc8, type: 3}
-  - {fileID: 2800000, guid: c06cc21c692f94f5fb5206247191eeee, type: 3}
-  - {fileID: 2800000, guid: cb76dd40fa7654f9587f6a344f125c9a, type: 3}
-  - {fileID: 2800000, guid: e32226222ff144b24bf3a5a451de54bc, type: 3}
-  - {fileID: 2800000, guid: 3302065f671a8450b82c9ddf07426f3a, type: 3}
-  - {fileID: 2800000, guid: 56a77a3e8d64f47b6afe9e3c95cb57d5, type: 3}
-  m_Shader: {fileID: 4800000, guid: 0849e84e3d62649e8882e9d6f056a017, type: 3}
 --- !u!114 &-1481777759031923265
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -70,7 +35,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: eab79a5f67fe36247b530546bd6af6d5, type: 3}
   m_Name: SeparableSubsurfaceScatterFeature
   m_EditorClassIdentifier: 
-  m_Active: 1
+  m_Active: 0
   settings:
     sssssPS: {fileID: 4800000, guid: f9aeb2d81cc0410a95ed35631c944951, type: 3}
     m_event: 500
@@ -91,12 +56,13 @@ MonoBehaviour:
       type: 3}
     hdrDebugViewPS: {fileID: 4800000, guid: 573620ae32aec764abd4d728906d2587, type: 3}
   m_RendererFeatures:
-  - {fileID: -1878332245247344467}
-  - {fileID: 7914389848471918926}
-  - {fileID: -4554141828574574587}
   - {fileID: -1481777759031923265}
-  m_RendererFeatureMap: adc0de57c6d2eee54e59208ca28fd56d058810c32270ccc0bfedd39cfaaa6feb
-  m_UseNativeRenderPass: 1
+  - {fileID: 7914389848471918926}
+  - {fileID: 2607283051905396433}
+  - {fileID: -4554141828574574587}
+  - {fileID: 1094229586116102683}
+  m_RendererFeatureMap: bfedd39cfaaa6feb4e59208ca28fd56dd1aeb7291fee2e24058810c32270ccc01b4a2cd7027c2f0f
+  m_UseNativeRenderPass: 0
   postProcessData: {fileID: 11400000, guid: 41439944d30ece34e96484bdb6645b55, type: 2}
   xrSystemData: {fileID: 11400000, guid: 60e1133243b97e347b653163a8c01b64, type: 2}
   shaders:
@@ -138,6 +104,67 @@ MonoBehaviour:
   m_CopyDepthMode: 0
   m_AccurateGbufferNormals: 0
   m_IntermediateTextureMode: 1
+--- !u!114 &1094229586116102683
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fbe9bc07732e9594dbde91366b7f968c, type: 3}
+  m_Name: GTAO
+  m_EditorClassIdentifier: 
+  m_Active: 1
+  Settings:
+    material: {fileID: 2100000, guid: dff7fe8799a88894b9471fcf5abf2a6c, type: 2}
+    DirSampler: 2
+    SliceSampler: 2
+    Radius: 2
+    Power: 4
+    Intensity: 0.8
+    Sharpeness: 0.1
+    AOBlurType: 1
+    TemporalFiltter: 0
+    TemporalScale: 1
+    TemporalResponse: 1
+    OutPass: 6
+--- !u!114 &2607283051905396433
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f62c9c65cf3354c93be831c8bc075510, type: 3}
+  m_Name: ScreenSpaceAmbientOcclusion
+  m_EditorClassIdentifier: 
+  m_Active: 0
+  m_Settings:
+    AOMethod: 0
+    Downsample: 0
+    AfterOpaque: 0
+    Source: 1
+    NormalSamples: 1
+    Intensity: 1.2
+    DirectLightingStrength: 0.25
+    Radius: 1.2
+    Samples: 0
+    BlurQuality: 0
+    Falloff: 9
+    SampleCount: -1
+  m_BlueNoise256Textures:
+  - {fileID: 2800000, guid: 36f118343fc974119bee3d09e2111500, type: 3}
+  - {fileID: 2800000, guid: 4b7b083e6b6734e8bb2838b0b50a0bc8, type: 3}
+  - {fileID: 2800000, guid: c06cc21c692f94f5fb5206247191eeee, type: 3}
+  - {fileID: 2800000, guid: cb76dd40fa7654f9587f6a344f125c9a, type: 3}
+  - {fileID: 2800000, guid: e32226222ff144b24bf3a5a451de54bc, type: 3}
+  - {fileID: 2800000, guid: 3302065f671a8450b82c9ddf07426f3a, type: 3}
+  - {fileID: 2800000, guid: 56a77a3e8d64f47b6afe9e3c95cb57d5, type: 3}
+  m_Shader: {fileID: 4800000, guid: 0849e84e3d62649e8882e9d6f056a017, type: 3}
 --- !u!114 &7914389848471918926
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -154,7 +181,7 @@ MonoBehaviour:
   settings:
     passTag: Mipmap Blur
     blurMaterial: {fileID: 2100000, guid: d168c8f16dfeb624ab9a23bd30b81b03, type: 2}
-    event: 600
+    event: 550
     blurLevel: 25
-    outPutToUIBackGround: 0
+    outPutToUIBackGround: 1
     redutionFrameRatio: 1

@@ -1677,5 +1677,15 @@ namespace UnityEngine.Rendering.Universal
         {
             return m_DepthTexture;
         }
+        
+        public override RTHandle GetCopyNormal()
+        {
+            return m_NormalsTexture;
+        }
+        
+        public override RTHandle GetCopyMoveVector()
+        {
+            return m_MotionVectorColor;
+        }
     }
 }

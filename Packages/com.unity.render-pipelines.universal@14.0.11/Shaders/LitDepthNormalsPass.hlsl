@@ -113,7 +113,8 @@ void DepthNormalsFragment(
         float2 octNormalWS = PackNormalOctQuadEncode(normalWS);           // values between [-1, +1], must use fp32 on some platforms
         float2 remappedOctNormalWS = saturate(octNormalWS * 0.5 + 0.5);   // values between [ 0,  1]
         half3 packedNormalWS = PackFloat2To888(remappedOctNormalWS);      // values between [ 0,  1]
-        outNormalWS = half4(packedNormalWS, 0.0);
+        // outNormalWS = half4(packedNormalWS, (1 - _Smoothness));
+        outNormalWS = half4(packedNormalWS, (_MaterialID - 128.0) / 128.0);
     #else
         #if defined(_PARALLAXMAP)
             #if defined(REQUIRES_TANGENT_SPACE_VIEW_DIR_INTERPOLATOR)
@@ -140,7 +141,8 @@ void DepthNormalsFragment(
             float3 normalWS = input.normalWS;
         #endif
 
-        outNormalWS = half4(NormalizeNormalPerPixel(normalWS), 0.0);
+        // outNormalWS = half4(NormalizeNormalPerPixel(normalWS), (1 - _Smoothness));
+        outNormalWS = half4(NormalizeNormalPerPixel(normalWS), (_MaterialID - 128.0) / 128.0);
     #endif
 
     #ifdef _WRITE_RENDERING_LAYERS

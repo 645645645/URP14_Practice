@@ -61,6 +61,8 @@ Shader "Universal Render Pipeline/Lit"
         // Editmode props
         _QueueOffset("Queue offset", Float) = 0.0
 
+        [HideInInspector] _MaterialID("ID", Float) = 0
+
         // ObsoleteProperties
         [HideInInspector] _MainTex("BaseMap", 2D) = "white" {}
         [HideInInspector] _Color("Base Color", Color) = (1, 1, 1, 1)
